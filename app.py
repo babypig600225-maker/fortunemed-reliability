@@ -133,8 +133,9 @@ CHART_COLORS = ['#378ADD','#1D9E75','#BA7517','#D85A30','#7F77DD','#D4537E',
                 '#2CA6A4','#E5A234','#5C85D6','#B84DB8']
 
 PLOT_LAYOUT = dict(
-    plot_bgcolor='white', paper_bgcolor='white',
-    font=dict(family="sans-serif", size=13, color="#1a1a18"),
+    plot_bgcolor='#ffffff', paper_bgcolor='#ffffff',
+    font=dict(family='"Noto Sans TC","Microsoft JhengHei","PingFang TC",system-ui,sans-serif',
+              size=13, color="#1d2530"),
     margin=dict(t=48, b=40, l=48, r=16),
 )
 GRID = dict(gridcolor='#eae8e1', linecolor='#eae8e1')
@@ -148,21 +149,35 @@ st.set_page_config(
 # ── 樣式 ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap');
+
+/* CSS 設計變數（與稼動率儀表板一致） */
+:root {
+    --bg: #f7f7f5; --card: #ffffff; --fg: #1d2530; --muted: #6b7684;
+    --line: #e4e6ea; --soft: #f1f3f6; --accent: #2563c9; --accent-soft: #e8f0fc;
+    --c-low: #d64541; --c-mid: #f0a020; --c-ok: #2e9d57;
+}
+
 /* 隱藏 Streamlit 預設 header / footer / menu */
 header[data-testid="stHeader"] { display: none !important; }
 #MainMenu { visibility: hidden !important; }
 footer { visibility: hidden !important; }
 
-/* 整體 */
+/* 整體字體與底色 */
+html, body, .main, [data-testid="stAppViewContainer"] {
+    font-family: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif !important;
+    background: var(--bg) !important;
+    color: var(--fg) !important;
+}
 .main { padding: 0 1.5rem; }
 .block-container { padding-top: 1rem !important; max-width:1400px; }
 
-/* 頂部標題 banner */
+/* 頂部標題 banner（簡潔白底風格） */
 .page-banner {
-    background: linear-gradient(135deg, #1A3A5C 0%, #2E6DA4 100%);
-    color: white;
-    padding: 18px 28px;
-    border-radius: 10px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 24px;
     margin-bottom: 16px;
     display: flex;
     align-items: center;
@@ -171,33 +186,57 @@ footer { visibility: hidden !important; }
 .page-banner-title {
     font-size: 22px;
     font-weight: 700;
-    letter-spacing: 1px;
+    color: var(--fg);
+    letter-spacing: 0.5px;
     white-space: normal;
     word-break: keep-all;
 }
 .page-banner-sub {
-    font-size: 12px;
-    opacity: 0.80;
+    font-size: 13px;
+    color: var(--muted);
     margin-top: 4px;
 }
 
-/* KPI 卡片 */
+/* KPI 卡片（白底 + 細邊框，與稼動率一致） */
 div[data-testid="metric-container"] {
-    background: #f5f4f0;
-    border-radius: 10px;
-    padding: 14px 16px !important;
-    border-left: 4px solid #2E6DA4;
+    background: var(--card) !important;
+    border-radius: 12px !important;
+    padding: 14px 18px !important;
+    border: 1px solid var(--line) !important;
 }
 div[data-testid="metric-container"] label {
     font-size: 13px !important;
-    color: #888780 !important;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    color: var(--muted) !important;
+    font-weight: 400 !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
 }
 div[data-testid="metric-container"] [data-testid="stMetricValue"] {
-    font-size: 26px !important;
-    font-weight: 700 !important;
-    color: #1A3A5C !important;
+    font-size: 1.85rem !important;
+    font-weight: 600 !important;
+    color: var(--fg) !important;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.25 !important;
+}
+
+/* Streamlit Tab 樣式（accent 底線） */
+[data-testid="stTabs"] [role="tablist"] {
+    border-bottom: 1px solid var(--line);
+    gap: 4px;
+}
+[data-testid="stTabs"] [role="tab"] {
+    font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif !important;
+    font-size: 14px !important;
+    color: var(--muted) !important;
+    padding: 9px 14px !important;
+    border-radius: 0 !important;
+    border-bottom: 2px solid transparent !important;
+    background: none !important;
+}
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    color: var(--accent) !important;
+    border-bottom-color: var(--accent) !important;
+    font-weight: 600 !important;
 }
 
 /* 設備類型標題 */
@@ -205,7 +244,7 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
     font-size: 18px;
     font-weight: 700;
     padding: 10px 16px;
-    border-radius: 6px;
+    border-radius: 8px;
     margin: 20px 0 8px 0;
     color: white;
 }
@@ -214,7 +253,7 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 .series-label {
     font-size: 15px;
     font-weight: 600;
-    color: #1a1a18;
+    color: var(--fg);
     margin: 4px 0 8px 0;
 }
 
@@ -222,24 +261,38 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 .section-title {
     font-size: 15px;
     font-weight: 600;
-    color: #2E6DA4;
-    border-bottom: 1px solid #dde3ea;
+    color: var(--accent);
+    border-bottom: 1px solid var(--line);
     padding-bottom: 4px;
     margin: 12px 0 8px 0;
 }
 
 /* 徽章 */
 .badge {
-    display:inline-block; padding:3px 12px; border-radius:4px;
+    display:inline-block; padding:3px 12px; border-radius:6px;
     font-size:13px; font-weight:600;
 }
 .badge-green { background:#e2efda; color:#1f7a4d; }
 .badge-red   { background:#fcebeb; color:#a32d2d; }
 .badge-amber { background:#fff2cc; color:#7b4f00; }
-.badge-blue  { background:#e6f1fb; color:#185fa5; }
+.badge-blue  { background:var(--accent-soft); color:var(--accent); }
 
 /* 表格 */
 .dataframe { font-size:14px !important; }
+
+/* Selectbox / multiselect label */
+[data-testid="stSelectbox"] label,
+[data-testid="stMultiSelect"] label {
+    font-size: 13px !important;
+    color: var(--muted) !important;
+}
+
+/* expander 卡片化 */
+[data-testid="stExpander"] {
+    background: var(--card) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 12px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
