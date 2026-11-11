@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import re, json, base64, requests, io
-from datetime import datetime
+from datetime import datetime, date
 
 # ── 常數 ─────────────────────────────────────────────────────────────
 GH_REPO   = "babypig600225-maker/fortunemed-reliability"
@@ -23,6 +23,36 @@ MONTH_ORDER = [f"2026-{m}月" for m in
 
 EQ_TYPE_MAP = {"301": "成型類", "302": "加工類", "303": "包裝類"}
 EQ_TYPE_ORDER = ["成型類", "加工類", "包裝類"]
+
+# ── 停工時數計算（與稼動率同口徑：上班日 08:00–20:00） ──────────────────
+WIN_START, WIN_END = 8, 20   # 工作視窗：08:00–20:00
+
+HOLIDAYS_2026 = {
+    date(2026, 1, 1), date(2026, 2, 16), date(2026, 2, 17), date(2026, 2, 18),
+    date(2026, 2, 19), date(2026, 2, 20), date(2026, 2, 27), date(2026, 4, 3),
+    date(2026, 4, 6),  date(2026, 5, 1),  date(2026, 6, 19), date(2026, 9, 25),
+    date(2026, 9, 28), date(2026, 10, 9), date(2026, 10, 26), date(2026, 12, 25),
+}
+
+def is_workday(d: date) -> bool:
+    return d.weekday() < 5 and d not in HOLIDAYS_2026
+
+def calc_window_hours(start, end) -> float:
+    """計算時間段在上班日 08:00–20:00 內的小時數"""
+    if pd.isna(start) or pd.isna(end) or end <= start:
+        return 0.0
+    total = 0.0
+    day = pd.Timestamp(start).normalize()
+    while day <= end:
+        if is_workday(day.date()):
+            win_s = day + pd.Timedelta(hours=WIN_START)
+            win_e = day + pd.Timedelta(hours=WIN_END)
+            s = max(start, win_s)
+            e = min(end, win_e)
+            if e > s:
+                total += (e - s).total_seconds() / 3600
+        day += pd.Timedelta(days=1)
+    return total
 
 # 設備流水碼 → 設備名稱對照表（來源：設備清單 Excel）
 SERIES_NAME = {
@@ -104,7 +134,7 @@ CHART_COLORS = ['#378ADD','#1D9E75','#BA7517','#D85A30','#7F77DD','#D4537E',
 
 PLOT_LAYOUT = dict(
     plot_bgcolor='white', paper_bgcolor='white',
-    font=dict(family="sans-serif", size=12, color="#1a1a18"),
+    font=dict(family="sans-serif", size=13, color="#1a1a18"),
     margin=dict(t=48, b=40, l=48, r=16),
 )
 GRID = dict(gridcolor='#eae8e1', linecolor='#eae8e1')
@@ -159,22 +189,22 @@ div[data-testid="metric-container"] {
     border-left: 4px solid #2E6DA4;
 }
 div[data-testid="metric-container"] label {
-    font-size: 11px !important;
+    font-size: 13px !important;
     color: #888780 !important;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 div[data-testid="metric-container"] [data-testid="stMetricValue"] {
-    font-size: 22px !important;
+    font-size: 26px !important;
     font-weight: 700 !important;
     color: #1A3A5C !important;
 }
 
 /* 設備類型標題 */
 .type-header {
-    font-size: 16px;
+    font-size: 18px;
     font-weight: 700;
-    padding: 8px 14px;
+    padding: 10px 16px;
     border-radius: 6px;
     margin: 20px 0 8px 0;
     color: white;
@@ -182,7 +212,7 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 
 /* 設備流水碼小標題 */
 .series-label {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     color: #1a1a18;
     margin: 4px 0 8px 0;
@@ -190,7 +220,7 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 
 /* 區塊標題 */
 .section-title {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     color: #2E6DA4;
     border-bottom: 1px solid #dde3ea;
@@ -200,8 +230,8 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 
 /* 徽章 */
 .badge {
-    display:inline-block; padding:2px 10px; border-radius:4px;
-    font-size:12px; font-weight:600;
+    display:inline-block; padding:3px 12px; border-radius:4px;
+    font-size:13px; font-weight:600;
 }
 .badge-green { background:#e2efda; color:#1f7a4d; }
 .badge-red   { background:#fcebeb; color:#a32d2d; }
@@ -209,7 +239,7 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 .badge-blue  { background:#e6f1fb; color:#185fa5; }
 
 /* 表格 */
-.dataframe { font-size:12px !important; }
+.dataframe { font-size:14px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -297,6 +327,12 @@ def parse_excel(file_bytes):
     df_all["機台代碼"] = df_all["設備名稱"].apply(extract_code)
     df_all["維修時數"] = pd.to_numeric(df_all["維修時數(h)"], errors="coerce").fillna(0).clip(lower=0)
     df_all["停機"]    = df_all["是否停機"].str.upper() == "YES"
+    # 時間戳（有則用於精確計算停工時數，與稼動率同口徑）
+    for col in ("建立時間", "完工時間"):
+        if col in df_all.columns:
+            df_all[col] = pd.to_datetime(df_all[col], errors="coerce")
+        else:
+            df_all[col] = pd.NaT
     df_all["缺料"]    = df_all["缺料"].astype(str).str.upper().isin(["是","有","YES"])
     df_all["完工超時"] = df_all["完工-超時"].notna() & (df_all["完工-超時"].astype(str).str.strip() != "")
     df_all["機台名稱"] = df_all["設備名稱"].apply(
@@ -331,7 +367,16 @@ def calc_kpi(df_all, hours_base, special_off):
         for code, mg in grp.groupby("機台代碼"):
             if not code: continue
             failures  = len(mg)
-            downtime  = mg[mg["停機"]]["維修時數"].sum()
+            # 停工時數：有時間戳 → 計算上班日 08:00-20:00 內有效停工時數（與稼動率同口徑）
+            #           無時間戳 → 退用填寫的維修時數
+            stopped = mg[mg["停機"]]
+            has_ts  = stopped["建立時間"].notna() & stopped["完工時間"].notna()
+            downtime = (
+                stopped[has_ts].apply(
+                    lambda r: calc_window_hours(r["建立時間"], r["完工時間"]), axis=1
+                ).sum()
+                + stopped[~has_ts]["維修時數"].sum()
+            )
             total_rep = mg["維修時數"].sum()
             repeat    = 1 if failures >= 2 else 0
             shortage  = mg["缺料"].sum()
@@ -876,6 +921,18 @@ def main():
         # 熱圖 — 分三大類
         st.markdown('<div class="section-title">機台系列 × 月份 — 可用率熱圖</div>',
                     unsafe_allow_html=True)
+        # 色階說明
+        st.markdown(
+            '<div style="display:flex;gap:16px;margin:4px 0 12px;font-size:13px;">'
+            '<span style="background:#fcebeb;padding:3px 10px;border-radius:4px;'
+            'color:#a32d2d;font-weight:600;">🟥 ＜80%　警示</span>'
+            '<span style="background:#fff2cc;padding:3px 10px;border-radius:4px;'
+            'color:#7b4f00;font-weight:600;">🟨 80–94%　偏低</span>'
+            '<span style="background:#e2efda;padding:3px 10px;border-radius:4px;'
+            'color:#1f7a4d;font-weight:600;">🟩 ≥95%　良好</span>'
+            '<span style="color:#888;padding:3px 0;">（格內數字為平均可用率 %）</span>'
+            '</div>',
+            unsafe_allow_html=True)
         TYPE_COLOR_HM = {"成型類": "#378ADD", "加工類": "#1D9E75", "包裝類": "#BA7517"}
         for eq_type in EQ_TYPE_ORDER:
             dk_hm = dk[dk["設備類型"] == eq_type]
@@ -883,7 +940,7 @@ def main():
                 continue
             type_color = TYPE_COLOR_HM.get(eq_type, "#378ADD")
             st.markdown(
-                f'<div style="font-size:13px;font-weight:700;color:{type_color};'
+                f'<div style="font-size:14px;font-weight:700;color:{type_color};'
                 f'margin:16px 0 6px;padding-left:8px;border-left:4px solid {type_color}">'
                 f'{eq_type}</div>', unsafe_allow_html=True)
             pivot = dk_hm.pivot_table(values="可用率(%)",
@@ -892,16 +949,18 @@ def main():
             pivot = pivot[ordered_cols]
             # 短月份標籤
             pivot.columns = [c.replace("2026-", "") for c in pivot.columns]
-            fig_hm = px.imshow(pivot, text_auto=True, aspect="auto",
+            fig_hm = px.imshow(pivot, text_auto=".1f", aspect="auto",
                                color_continuous_scale=["#fcebeb","#fff2cc","#e2efda"],
                                zmin=70, zmax=100)
             fig_hm.update_layout(
-                height=max(180, len(pivot) * 32 + 60),
-                margin=dict(t=10, b=10, l=120, r=60),
+                height=max(200, len(pivot) * 38 + 60),
+                margin=dict(t=10, b=10, l=130, r=60),
                 paper_bgcolor='white', plot_bgcolor='white',
                 coloraxis_showscale=False,
+                font=dict(size=13),
             )
-            fig_hm.update_xaxes(side="bottom", tickangle=0)
+            fig_hm.update_xaxes(side="bottom", tickangle=0, tickfont=dict(size=13))
+            fig_hm.update_yaxes(tickfont=dict(size=13))
             st.plotly_chart(fig_hm, use_container_width=True)
 
     st.markdown("---")
