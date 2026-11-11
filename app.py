@@ -664,16 +664,16 @@ def main():
                         xaxis="x2",
                     )
                     chart_h = max(200, len(df_chart) * 36 + 60)
-                    fig_t.update_layout(
+                    fig_t.update_layout(**{
                         **PLOT_LAYOUT,
-                        height=chart_h,
-                        xaxis=dict(title="故障次數", side="bottom", **GRID),
-                        xaxis2=dict(title="停工時數(h)", overlaying="x", side="top",
-                                    showgrid=False),
-                        yaxis=dict(automargin=True, **GRID),
-                        legend=dict(x=1.02, y=1, orientation="v"),
-                        margin=dict(t=48, b=40, l=180, r=100),
-                    )
+                        "height": chart_h,
+                        "xaxis": dict(title="故障次數", side="bottom", **GRID),
+                        "xaxis2": dict(title="停工時數(h)", overlaying="x", side="top",
+                                       showgrid=False),
+                        "yaxis": dict(automargin=True, **GRID),
+                        "legend": dict(x=1.02, y=1, orientation="v"),
+                        "margin": dict(t=48, b=40, l=180, r=100),
+                    })
                     st.plotly_chart(fig_t, use_container_width=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
