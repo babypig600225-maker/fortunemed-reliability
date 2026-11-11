@@ -118,9 +118,14 @@ st.set_page_config(
 # ── 樣式 ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+/* 隱藏 Streamlit 預設 header / footer / menu */
+header[data-testid="stHeader"] { display: none !important; }
+#MainMenu { visibility: hidden !important; }
+footer { visibility: hidden !important; }
+
 /* 整體 */
-.main { padding: 0.5rem 1.5rem; }
-.block-container { padding-top: 0.5rem !important; max-width:1400px; }
+.main { padding: 0 1.5rem; }
+.block-container { padding-top: 1rem !important; max-width:1400px; }
 
 /* 頂部標題 banner */
 .page-banner {
@@ -137,7 +142,8 @@ st.markdown("""
     font-size: 22px;
     font-weight: 700;
     letter-spacing: 1px;
-    white-space: nowrap;
+    white-space: normal;
+    word-break: keep-all;
 }
 .page-banner-sub {
     font-size: 12px;
