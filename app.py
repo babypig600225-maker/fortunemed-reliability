@@ -28,9 +28,8 @@ PLOT_LAYOUT = dict(
     plot_bgcolor='white', paper_bgcolor='white',
     font=dict(family="sans-serif", size=12, color="#1a1a18"),
     margin=dict(t=48, b=40, l=48, r=16),
-    xaxis=dict(gridcolor='#eae8e1', linecolor='#eae8e1'),
-    yaxis=dict(gridcolor='#eae8e1', linecolor='#eae8e1'),
 )
+GRID = dict(gridcolor='#eae8e1', linecolor='#eae8e1')
 
 st.set_page_config(
     page_title="富強醫材｜設備可靠性分析",
@@ -152,8 +151,12 @@ def parse_excel(file_bytes):
     df_all["完工超時"] = df_all["完工-超時"].notna() & (df_all["完工-超時"].astype(str).str.strip() != "")
     df_all["機台名稱"] = df_all["設備名稱"].apply(
         lambda x: re.sub(r"^M-\d{3}-\d{3}-\d+\s*", "", str(x)) if pd.notna(x) else "")
-    df_all["系列"] = df_all["機台代碼"].apply(
-        lambda x: x[:7] if isinstance(x, str) else "")
+    # 系列 = M-XXX-YYY（前兩段，如 M-301-005）
+    def extract_series(code):
+        if not isinstance(code, str): return ""
+        m = re.match(r"(M-\d{3}-\d{3})", code)
+        return m.group(1) if m else code
+    df_all["系列"] = df_all["機台代碼"].apply(extract_series)
 
     return df_all, hours_base, None
 
