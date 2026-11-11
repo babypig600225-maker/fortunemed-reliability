@@ -112,7 +112,7 @@ GRID = dict(gridcolor='#eae8e1', linecolor='#eae8e1')
 st.set_page_config(
     page_title="富強醫材｜設備可靠性分析",
     page_icon="🔧", layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # ── 樣式 ─────────────────────────────────────────────────────────────
@@ -425,33 +425,31 @@ def main():
 
     stored = load_data()
 
-    # ── Sidebar ───────────────────────────────────────────────────────
-    with st.sidebar:
-        st.header("🔑 管理員更新資料")
-        # 顯示 token 狀態
+    # ── 資料更新區（主畫面可折疊）────────────────────────────────────────
+    special_off = {}
+    if stored and stored.get("special_off"):
+        special_off = {k: v for k, v in stored["special_off"].items()}
+
+    with st.expander("🔑 管理員更新資料", expanded=not bool(stored)):
         _tok = st.secrets.get("GITHUB_TOKEN", "")
-        if _tok:
-            st.caption(f"🔑 Token: ...{_tok[-6:]}")
-        else:
-            st.error("⚠️ GITHUB_TOKEN 未設定")
-        up_file = st.file_uploader("上傳報修 Excel（含時數工作表）",
-                                   type=["xlsx"], key="uploader")
-
-        special_off = {}
-        if stored and stored.get("special_off"):
-            special_off = {k: v for k, v in stored["special_off"].items()}
-
-        with st.expander("📅 特殊停工調整（颱風、旅遊…）"):
-            st.caption("填入該月額外未開工的時數，系統自動從可用時數扣除")
-            for mo in MONTH_ORDER:
-                label = mo.replace("2026-", "")
-                val = special_off.get(mo, 0)
-                new_val = st.number_input(label, min_value=0, max_value=240,
-                                          value=int(val), step=1, key=f"sp_{mo}")
-                if new_val:
-                    special_off[mo] = new_val
-                elif mo in special_off:
-                    del special_off[mo]
+        if not _tok:
+            st.error("⚠️ GITHUB_TOKEN 未設定 — 請至 Streamlit Cloud → App settings → Secrets 加入")
+        up_col, sp_col = st.columns([1, 1])
+        with up_col:
+            up_file = st.file_uploader("上傳報修 Excel（含時數工作表）",
+                                       type=["xlsx"], key="uploader")
+        with sp_col:
+            with st.expander("📅 特殊停工調整（颱風、旅遊…）"):
+                st.caption("填入該月額外未開工的時數，系統自動從可用時數扣除")
+                for mo in MONTH_ORDER:
+                    label = mo.replace("2026-", "")
+                    val = special_off.get(mo, 0)
+                    new_val = st.number_input(label, min_value=0, max_value=240,
+                                              value=int(val), step=1, key=f"sp_{mo}")
+                    if new_val:
+                        special_off[mo] = new_val
+                    elif mo in special_off:
+                        del special_off[mo]
 
         if up_file:
             file_bytes = up_file.read()
@@ -462,12 +460,11 @@ def main():
             elif df_all_new is None or df_all_new.empty:
                 st.error("❌ 解析失敗：找不到有效資料，請確認 Excel 格式")
             else:
-                # 顯示解析結果預覽
                 series_found = df_all_new["機台代碼"].dropna().apply(
                     lambda c: re.match(r"(M-\d{3}-\d{3})", str(c)).group(1)
                     if re.match(r"(M-\d{3}-\d{3})", str(c)) else None
                 ).dropna().unique()
-                st.caption(f"✓ 解析完成：{len(df_all_new)} 筆記錄，系列：{', '.join(sorted(series_found)[:8])}{'…' if len(series_found)>8 else ''}")
+                st.success(f"✓ 解析完成：{len(df_all_new)} 筆記錄，發現系列：{', '.join(sorted(series_found)[:10])}{'…' if len(series_found)>10 else ''}")
                 df_kpi_new = calc_kpi(df_all_new, hours_base_new, special_off)
                 raw_cols = ["月份","機台代碼","機台名稱","系列","設備類型","維修時數","停機","缺料","完工超時"]
                 for col in ["需求","部門","設備名稱"]:
@@ -482,21 +479,21 @@ def main():
                 }
                 ok, msg = save_data(payload)
                 if ok:
-                    st.toast(msg, icon="✅")
+                    st.toast("✅ 資料已儲存！頁面更新中…")
                     st.cache_data.clear()
                     st.rerun()
                 else:
                     st.error(f"❌ 儲存失敗：{msg}")
-                    st.stop()
-
         elif stored:
-            st.success(f"資料更新時間：{stored.get('updated','—')}")
+            st.caption(f"資料更新時間：{stored.get('updated','—')}")
             if st.button("更新特殊停工設定"):
                 stored["special_off"] = special_off
                 ok, msg = save_data(stored)
-                st.info(msg)
                 if ok:
+                    st.toast("✅ 已更新特殊停工設定")
                     st.cache_data.clear()
+                else:
+                    st.error(msg)
 
     # ── 無資料畫面 ────────────────────────────────────────────────────
     if not stored:
@@ -504,7 +501,7 @@ def main():
         <div style="text-align:center;padding:80px 0;">
         <div style="font-size:48px;margin-bottom:12px">📊</div>
         <div style="font-size:18px;font-weight:600;color:#1a1a18;margin-bottom:8px">尚無資料</div>
-        <div style="font-size:13px;color:#888780">請由左側上傳報修 Excel 檔案</div>
+        <div style="font-size:13px;color:#888780">請展開上方「🔑 管理員更新資料」區域上傳報修 Excel 檔案</div>
         </div>""", unsafe_allow_html=True)
         return
 
