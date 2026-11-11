@@ -257,7 +257,7 @@ def parse_excel(file_bytes):
                 weekdays = int(row.iloc[1]) if pd.notna(row.iloc[1]) else 0
                 holiday  = int(row.iloc[2]) if pd.notna(row.iloc[2]) else 0
                 key = f"2026-{m}"
-                hours_base[key] = weekdays * 12 + holiday * 8.5
+                hours_base[key] = weekdays * 11  # 假日維修部門不上班，不計入
 
     defaults = {
         "2026-1月":263,"2026-2月":162,"2026-3月":274,"2026-4月":228,
@@ -716,7 +716,15 @@ def main():
             return "background-color:#fcebeb"
 
         st.dataframe(
-            agg.style.map(color_avail, subset=["平均可用率"]),
+            agg.style
+               .map(color_avail, subset=["平均可用率"])
+               .format({
+                   "停工時數":  "{:.2f}",
+                   "總維修時數": "{:.2f}",
+                   "平均MTBF":  "{:.2f}",
+                   "平均MTTR":  "{:.2f}",
+                   "平均可用率": "{:.2f}",
+               }),
             use_container_width=True, hide_index=True)
 
         st.markdown("---")
@@ -724,9 +732,11 @@ def main():
         if sel_m != "— 選擇機台 —":
             dm = dk[dk["機台代碼"] == sel_m].sort_values(
                 "月份", key=lambda x: x.map({m:i for i,m in enumerate(MONTH_ORDER)}))
-            st.dataframe(dm[["月份","故障次數","停機次數","停工時數(h)",
-                             "MTBF(h)","MTTR(h)","可用率(%)"]],
-                         use_container_width=True, hide_index=True)
+            float_cols_dm = ["停工時數(h)", "MTBF(h)", "MTTR(h)", "可用率(%)"]
+            st.dataframe(
+                dm[["月份","故障次數","停機次數","停工時數(h)","MTBF(h)","MTTR(h)","可用率(%)"]
+                  ].style.format({c: "{:.2f}" for c in float_cols_dm}),
+                use_container_width=True, hide_index=True)
 
     # ══ Tab3：故障分析 ═════════════════════════════════════════════════
     with tab3:
@@ -737,6 +747,7 @@ def main():
                         unsafe_allow_html=True)
             top10 = dk.groupby(["機台代碼","機台名稱"])["停工時數(h)"].sum()\
                       .reset_index().nlargest(10,"停工時數(h)")
+            top10["停工時數(h)"] = top10["停工時數(h)"].round(2)
             fig2 = go.Figure(go.Bar(
                 x=top10["停工時數(h)"], y=top10["機台代碼"],
                 orientation="h", text=top10["停工時數(h)"],
@@ -862,19 +873,36 @@ def main():
                 yaxis=dict(title="可用率(%)", range=[0,110], gridcolor='#eae8e1'))
             st.plotly_chart(fig7, use_container_width=True)
 
-        # 熱圖
+        # 熱圖 — 分三大類
         st.markdown('<div class="section-title">機台系列 × 月份 — 可用率熱圖</div>',
                     unsafe_allow_html=True)
-        pivot = dk.pivot_table(values="可用率(%)",
-                               index="系列", columns="月份", aggfunc="mean").round(2)
-        ordered_cols = [c for c in MONTH_ORDER if c in pivot.columns]
-        pivot = pivot[ordered_cols]
-        fig8 = px.imshow(pivot, text_auto=True, aspect="auto",
-                         color_continuous_scale=["#fcebeb","#fff2cc","#e2efda"],
-                         zmin=70, zmax=100)
-        fig8.update_layout(height=380, margin=dict(t=10,b=10),
-                           paper_bgcolor='white', plot_bgcolor='white')
-        st.plotly_chart(fig8, use_container_width=True)
+        TYPE_COLOR_HM = {"成型類": "#378ADD", "加工類": "#1D9E75", "包裝類": "#BA7517"}
+        for eq_type in EQ_TYPE_ORDER:
+            dk_hm = dk[dk["設備類型"] == eq_type]
+            if dk_hm.empty:
+                continue
+            type_color = TYPE_COLOR_HM.get(eq_type, "#378ADD")
+            st.markdown(
+                f'<div style="font-size:13px;font-weight:700;color:{type_color};'
+                f'margin:16px 0 6px;padding-left:8px;border-left:4px solid {type_color}">'
+                f'{eq_type}</div>', unsafe_allow_html=True)
+            pivot = dk_hm.pivot_table(values="可用率(%)",
+                                      index="系列", columns="月份", aggfunc="mean").round(2)
+            ordered_cols = [c for c in MONTH_ORDER if c in pivot.columns]
+            pivot = pivot[ordered_cols]
+            # 短月份標籤
+            pivot.columns = [c.replace("2026-", "") for c in pivot.columns]
+            fig_hm = px.imshow(pivot, text_auto=True, aspect="auto",
+                               color_continuous_scale=["#fcebeb","#fff2cc","#e2efda"],
+                               zmin=70, zmax=100)
+            fig_hm.update_layout(
+                height=max(180, len(pivot) * 32 + 60),
+                margin=dict(t=10, b=10, l=120, r=60),
+                paper_bgcolor='white', plot_bgcolor='white',
+                coloraxis_showscale=False,
+            )
+            fig_hm.update_xaxes(side="bottom", tickangle=0)
+            st.plotly_chart(fig_hm, use_container_width=True)
 
     st.markdown("---")
     st.caption("富強醫材股份有限公司 設備課　© 2026")
