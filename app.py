@@ -589,7 +589,9 @@ def main():
     # ── 全局篩選器 ────────────────────────────────────────────────────
     fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 1])
     with fc1:
-        month_opts = ["全部月份"] + months_avail
+        # 月份：最新月份排最前（方便選最近一個月）
+        months_desc = list(reversed(months_avail))
+        month_opts = ["全部月份"] + months_desc
         sel_month_single = st.selectbox("月份", month_opts, key="f_month_single")
         if sel_month_single == "全部月份":
             sel_months = months_avail
@@ -597,7 +599,11 @@ def main():
             sel_months = [sel_month_single]
     with fc2:
         all_series = sorted(df_kpi["系列"].unique())
-        sel_series = st.multiselect("機台系列", all_series, default=[], key="f_series")
+        # 顯示標籤加上中文名稱，如「M-301-005 押出機」
+        series_labels = [f"{s}　{SERIES_NAME[s]}" if s in SERIES_NAME else s for s in all_series]
+        label_to_series = dict(zip(series_labels, all_series))
+        sel_labels = st.multiselect("機台系列", series_labels, default=[], key="f_series")
+        sel_series = [label_to_series[lb] for lb in sel_labels]
     with fc3:
         only_stop = st.checkbox("只顯示有停機記錄的機台", key="f_stop")
     with fc4:
