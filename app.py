@@ -24,6 +24,81 @@ MONTH_ORDER = [f"2026-{m}月" for m in
 EQ_TYPE_MAP = {"301": "成型類", "302": "加工類", "303": "包裝類"}
 EQ_TYPE_ORDER = ["成型類", "加工類", "包裝類"]
 
+# 設備流水碼 → 設備名稱對照表（來源：設備清單 Excel）
+SERIES_NAME = {
+    "M-301-001": "混料機",
+    "M-301-002": "送料機",
+    "M-301-003": "抽料機",
+    "M-301-004": "加硫機",
+    "M-301-005": "押出機",
+    "M-301-006": "雷射測定器",
+    "M-301-007": "自動外徑控制器",
+    "M-301-008": "自動裁切機",
+    "M-301-009": "單機型壓鑄成型機",
+    "M-301-010": "射出成型機",
+    "M-301-011": "液態矽膠射出成型機",
+    "M-301-012": "無廢料後射出成型機",
+    "M-301-018": "烤箱",
+    "M-301-019": "冰水機",
+    "M-301-025": "無廢料後射出成型機",
+    "M-301-026": "噴塗淋球機",
+    "M-301-027": "雷射控制器",
+    "M-301-028": "2KM供料機",
+    "M-301-030": "模溫機",
+    "M-301-031": "塗膜機",
+    "M-301-033": "打碎機",
+    "M-301-034": "放卷機",
+    "M-302-002": "拉力測試機",
+    "M-302-004": "試球機",
+    "M-302-005": "桌上型鑽床",
+    "M-302-008": "磨R角機",
+    "M-302-010": "TIP接著機(油壓)",
+    "M-302-011": "吸球吸力測試機",
+    "M-302-012": "流量機",
+    "M-302-014": "網印機",
+    "M-302-016": "T3印刷加硫機",
+    "M-302-018": "超音波塑膠熔接機",
+    "M-302-019": "黏球機",
+    "M-302-021": "測漏機",
+    "M-302-023": "封箱機",
+    "M-302-026": "CV接著機",
+    "M-302-027": "CV接著機",
+    "M-302-028": "活塞色套機",
+    "M-302-029": "自動沖床機",
+    "M-302-030": "氣動沖壓機",
+    "M-302-031": "C型油壓壓床",
+    "M-302-039": "T3印刷加硫機",
+    "M-302-041": "點膠機",
+    "M-302-042": "磨R角機",
+    "M-302-044": "墨杯式移印機",
+    "M-302-045": "吸球組裝機",
+    "M-302-046": "攪拌機",
+    "M-302-047": "C型油壓壓床",
+    "M-302-048": "點膠機",
+    "M-302-049": "封閉式刮痰管測試機",
+    "M-302-053": "引流袋焊接測漏設備",
+    "M-302-055": "電烤箱",
+    "M-303-001": "消毒袋封口機",
+    "M-303-002": "腳踏/手壓封口機",
+    "M-303-003": "貼標機",
+    "M-303-007": "條碼機",
+    "M-303-008": "超音波清洗機",
+    "M-303-009": "腳踏/手壓封口機",
+    "M-303-010": "啟德包裝機",
+    "M-303-011": "打包機",
+    "M-303-012": "小型BI培養鍋",
+    "M-303-013": "EO負壓滅菌鍋",
+    "M-303-017": "燙金機",
+    "M-303-018": "收縮機",
+    "M-303-020": "預熱室",
+    "M-303-021": "連續性封口機",
+    "M-303-022": "凝膠充填機",
+    "M-303-023": "鎖蓋機",
+    "M-303-025": "泡殼機",
+    "M-303-028": "密著包裝機",
+    "M-303-029": "移動式伸縮包膜機",
+}
+
 CHART_COLORS = ['#378ADD','#1D9E75','#BA7517','#D85A30','#7F77DD','#D4537E',
                 '#2CA6A4','#E5A234','#5C85D6','#B84DB8']
 
@@ -40,18 +115,84 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ── 樣式（與 KPI 儀表板一致）─────────────────────────────────────────
+# ── 樣式 ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-.main { padding: 1rem 2rem; }
-.block-container { padding-top: 1rem; }
-.stMetric { background:#f5f4f0; border-radius:8px; padding:0.75rem 1rem; }
-.stMetric label { font-size:12px; color:#888780; }
-.stMetric [data-testid="metric-container"] { background:#f5f4f0; border-radius:8px; }
-div[data-testid="column"] { gap:0.5rem; }
-h1 { font-size:22px !important; color:#1A3A5C !important; }
-h2 { font-size:16px !important; color:#2E6DA4 !important; }
-h3 { font-size:14px !important; }
+/* 整體 */
+.main { padding: 0.5rem 1.5rem; }
+.block-container { padding-top: 0.5rem !important; max-width:1400px; }
+
+/* 頂部標題 banner */
+.page-banner {
+    background: linear-gradient(135deg, #1A3A5C 0%, #2E6DA4 100%);
+    color: white;
+    padding: 18px 28px;
+    border-radius: 10px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.page-banner-title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    white-space: nowrap;
+}
+.page-banner-sub {
+    font-size: 12px;
+    opacity: 0.80;
+    margin-top: 4px;
+}
+
+/* KPI 卡片 */
+div[data-testid="metric-container"] {
+    background: #f5f4f0;
+    border-radius: 10px;
+    padding: 14px 16px !important;
+    border-left: 4px solid #2E6DA4;
+}
+div[data-testid="metric-container"] label {
+    font-size: 11px !important;
+    color: #888780 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+div[data-testid="metric-container"] [data-testid="stMetricValue"] {
+    font-size: 22px !important;
+    font-weight: 700 !important;
+    color: #1A3A5C !important;
+}
+
+/* 設備類型標題 */
+.type-header {
+    font-size: 16px;
+    font-weight: 700;
+    padding: 8px 14px;
+    border-radius: 6px;
+    margin: 20px 0 8px 0;
+    color: white;
+}
+
+/* 設備流水碼小標題 */
+.series-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1a1a18;
+    margin: 4px 0 8px 0;
+}
+
+/* 區塊標題 */
+.section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #2E6DA4;
+    border-bottom: 1px solid #dde3ea;
+    padding-bottom: 4px;
+    margin: 12px 0 8px 0;
+}
+
+/* 徽章 */
 .badge {
     display:inline-block; padding:2px 10px; border-radius:4px;
     font-size:12px; font-weight:600;
@@ -60,10 +201,9 @@ h3 { font-size:14px !important; }
 .badge-red   { background:#fcebeb; color:#a32d2d; }
 .badge-amber { background:#fff2cc; color:#7b4f00; }
 .badge-blue  { background:#e6f1fb; color:#185fa5; }
-.section-title {
-    font-size:14px; font-weight:600; color:#1a1a18;
-    margin:1rem 0 0.5rem;
-}
+
+/* 表格 */
+.dataframe { font-size:12px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -267,8 +407,15 @@ def avail_badge(val):
 
 # ══════════════════════════════════════════════════════════════════════
 def main():
-    # ── 標題 ──
-    st.markdown("## 🔧 富強醫材股份有限公司 — 設備可靠性分析")
+    # ── 頂部標題 banner ──
+    st.markdown("""
+    <div class="page-banner">
+        <div>
+            <div class="page-banner-title">🔧 設備可靠性分析儀表板</div>
+            <div class="page-banner-sub">富強醫材股份有限公司 設備課｜Equipment Reliability Dashboard</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     stored = load_data()
 
@@ -363,16 +510,15 @@ def main():
     df_summary = monthly_summary(df_kpi, hours_base, special_off)
     df_summary_type = monthly_summary_by_type(df_kpi, hours_base, special_off)
 
-    # ── 頂部資訊列 ──
-    col_info, col_btn = st.columns([5, 1])
-    with col_info:
-        m_range = f"{months_avail[0].replace('2026-','')} – {months_avail[-1].replace('2026-','')}" if months_avail else ""
-        st.caption(f"📅 2026年 {m_range}　　富強醫材股份有限公司 設備課　　資料更新：{stored.get('updated','—')}")
-    with col_btn:
+    # ── 資訊列 ──
+    m_range = f"{months_avail[0].replace('2026-','')} – {months_avail[-1].replace('2026-','')}" if months_avail else ""
+    info_col, btn_col = st.columns([6, 1])
+    with info_col:
+        st.caption(f"📅 2026年 {m_range}　｜　資料更新：{stored.get('updated','—')}")
+    with btn_col:
         if st.button("↩ 重新上傳"):
             st.cache_data.clear()
             st.rerun()
-
     st.divider()
 
     # ── 全局篩選器 ────────────────────────────────────────────────────
@@ -418,11 +564,12 @@ def main():
 
         TYPE_COLOR = {"成型類": "#378ADD", "加工類": "#1D9E75", "包裝類": "#BA7517"}
 
-        # 取得各系列的設備類型及名稱（用最常出現的名稱代表該系列）
+        # 取得各系列的設備類型；名稱優先查對照表
         series_meta = (dk.groupby("系列")
-                         .agg(設備類型=("設備類型", lambda x: x.mode()[0] if len(x) else "其他"),
-                              機台名稱=("機台名稱", lambda x: x.mode()[0] if len(x) else ""))
+                         .agg(設備類型=("設備類型", lambda x: x.mode()[0] if len(x) else "其他"))
                          .reset_index())
+        series_meta["機台名稱"] = series_meta["系列"].map(
+            lambda s: SERIES_NAME.get(s, ""))
 
         for eq_type in EQ_TYPE_ORDER:
             series_in_type = series_meta[series_meta["設備類型"] == eq_type]["系列"].tolist()
@@ -433,9 +580,8 @@ def main():
             # ── 大類標題 ──
             type_color = TYPE_COLOR.get(eq_type, "#378ADD")
             st.markdown(
-                f'<div style="font-size:17px;font-weight:700;color:{type_color};'
-                f'border-left:4px solid {type_color};padding-left:10px;'
-                f'margin:24px 0 12px 0">▌ {eq_type}</div>',
+                f'<div class="type-header" style="background:{type_color}">'
+                f'▌ {eq_type}</div>',
                 unsafe_allow_html=True)
 
             # ── 各設備流水碼 ──
