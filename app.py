@@ -128,7 +128,7 @@ def parse_excel(file_bytes):
         return m.group(0) if m else None
 
     df_all["機台代碼"]  = df_all["設備名稱"].apply(extract_code)
-    df_all["維修時數"]  = pd.to_numeric(df_all["維修時數(h)"], errors="coerce").fillna(0)
+    df_all["維修時數"]  = pd.to_numeric(df_all["維修時數(h)"], errors="coerce").fillna(0).clip(lower=0)
     df_all["停機"]      = df_all["是否停機"].str.upper() == "YES"
     df_all["缺料"]      = df_all["缺料"].astype(str).str.upper().isin(["是","有","YES"])
     df_all["完工超時"]  = df_all["完工-超時"].notna() & (df_all["完工-超時"].astype(str).str.strip() != "")
@@ -363,7 +363,7 @@ def main():
             return ""
 
         st.dataframe(
-            ds.style.applymap(style_avail, subset=["平均可用率(%)"]),
+            ds.style.map(style_avail, subset=["平均可用率(%)"]),
             use_container_width=True, hide_index=True)
 
         # 月別故障+停工雙軸圖
@@ -403,7 +403,7 @@ def main():
             return "background-color:#ffe3e3"
 
         st.dataframe(
-            agg.style.applymap(color_avail, subset=["平均可用率"]),
+            agg.style.map(color_avail, subset=["平均可用率"]),
             use_container_width=True, hide_index=True)
 
         # 月份明細下鑽
