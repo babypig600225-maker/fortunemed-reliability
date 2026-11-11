@@ -554,105 +554,123 @@ def main():
     tab1, tab2, tab3, tab4 = st.tabs(
         ["📊 月別總覽", "🔧 機台明細", "⚠️ 故障分析", "📈 趨勢分析"])
 
-    # ══ Tab1：月別總覽（大類 → 各設備流水碼）════════════════════════════
+    # ══ Tab1：月別總覽（大類 → 系列代碼一覽表）════════════════════════════
     with tab1:
-        def style_avail(val):
+        TYPE_COLOR = {"成型類": "#378ADD", "加工類": "#1D9E75", "包裝類": "#BA7517"}
+
+        def style_avail_cell(val):
             if not isinstance(val, (int, float)): return ""
             if val >= THRESHOLD_AVAIL: return "color:#1f7a4d;font-weight:600"
             elif val >= 80: return "color:#7b4f00"
             return "color:#a32d2d;font-weight:600"
 
-        TYPE_COLOR = {"成型類": "#378ADD", "加工類": "#1D9E75", "包裝類": "#BA7517"}
-
-        # 取得各系列的設備類型；名稱優先查對照表
-        series_meta = (dk.groupby("系列")
-                         .agg(設備類型=("設備類型", lambda x: x.mode()[0] if len(x) else "其他"))
-                         .reset_index())
-        series_meta["機台名稱"] = series_meta["系列"].map(
-            lambda s: SERIES_NAME.get(s, ""))
+        def style_failures(val):
+            if not isinstance(val, (int, float)): return ""
+            if val == 0: return "color:#888"
+            if val >= 5: return "color:#a32d2d;font-weight:600"
+            return ""
 
         for eq_type in EQ_TYPE_ORDER:
-            series_in_type = series_meta[series_meta["設備類型"] == eq_type]["系列"].tolist()
-            series_in_type = sorted(series_in_type)
-            if not series_in_type:
+            type_color = TYPE_COLOR.get(eq_type, "#378ADD")
+            # 該類所有資料
+            dk_type = dk[dk["設備類型"] == eq_type]
+            if dk_type.empty:
                 continue
 
             # ── 大類標題 ──
-            type_color = TYPE_COLOR.get(eq_type, "#378ADD")
             st.markdown(
                 f'<div class="type-header" style="background:{type_color}">'
                 f'▌ {eq_type}</div>',
                 unsafe_allow_html=True)
 
-            # ── 各設備流水碼 ──
-            for series_code in series_in_type:
-                # 設備名稱
-                eq_name = series_meta.loc[series_meta["系列"] == series_code, "機台名稱"].values
-                eq_name = eq_name[0] if len(eq_name) else ""
-                label = f"{series_code}　{eq_name}" if eq_name else series_code
+            # ── 大類 KPI 摘要卡 ──
+            k1, k2, k3, k4, k5 = st.columns(5)
+            t_machines = dk_type["機台代碼"].nunique()
+            t_fail  = int(dk_type["故障次數"].sum())
+            t_down  = round(dk_type["停工時數(h)"].sum(), 2)
+            t_mtbf  = round(dk_type["MTBF(h)"].mean(), 2)
+            t_avail = round(dk_type["可用率(%)"].mean(), 2)
+            k1.metric("涉及機台數", f"{t_machines} 台")
+            k2.metric("故障次數", f"{t_fail} 次")
+            k3.metric("總停工時數", f"{t_down} h")
+            k4.metric("平均MTBF", f"{t_mtbf} h",
+                      "✓ 達標" if t_mtbf >= THRESHOLD_MTBF else f"目標≥{THRESHOLD_MTBF}h",
+                      delta_color="normal" if t_mtbf >= THRESHOLD_MTBF else "inverse")
+            k5.metric("平均可用率", f"{t_avail}%",
+                      "✓ 達標" if t_avail >= THRESHOLD_AVAIL else f"目標≥{THRESHOLD_AVAIL}%",
+                      delta_color="normal" if t_avail >= THRESHOLD_AVAIL else "inverse")
 
-                with st.expander(f"🔩 {label}", expanded=True):
-                    # 月別彙總（同系列所有台次合計）
-                    sk = dk[dk["系列"] == series_code]
-                    sk_months = sorted(sk["月份"].unique(),
-                                       key=lambda x: MONTH_ORDER.index(x) if x in MONTH_ORDER else 99)
-                    s_rows = []
-                    for mo in sk_months:
-                        mk = sk[sk["月份"] == mo]
-                        s_rows.append({
-                            "月份": mo,
-                            "台數": mk["機台代碼"].nunique(),
-                            "故障次數": int(mk["故障次數"].sum()),
-                            "停工時數(h)": round(mk["停工時數(h)"].sum(), 2),
-                            "平均MTBF(h)": round(mk["MTBF(h)"].mean(), 2),
-                            "平均MTTR(h)": round(mk["MTTR(h)"].mean(), 2),
-                            "平均可用率(%)": round(mk["可用率(%)"].mean(), 2),
-                            "重複故障台數": int(mk["重複故障"].sum()),
-                        })
-                    df_s = pd.DataFrame(s_rows)
-                    if df_s.empty:
-                        st.info("本篩選條件無資料")
-                        continue
+            st.markdown("<br>", unsafe_allow_html=True)
 
-                    # KPI Cards
-                    k1, k2, k3, k4, k5 = st.columns(5)
-                    s_f = int(df_s["故障次數"].sum())
-                    s_d = round(df_s["停工時數(h)"].sum(), 2)
-                    s_mtbf = round(df_s["平均MTBF(h)"].mean(), 2)
-                    s_mttr = round(df_s["平均MTTR(h)"].mean(), 2)
-                    s_avail = round(df_s["平均可用率(%)"].mean(), 2)
-                    k1.metric("總故障次數", f"{s_f} 次")
-                    k2.metric("總停工時數", f"{s_d} h")
-                    k3.metric("平均MTBF", f"{s_mtbf} h",
-                              "✓ 達標" if s_mtbf >= THRESHOLD_MTBF else f"目標≥{THRESHOLD_MTBF}h",
-                              delta_color="normal" if s_mtbf >= THRESHOLD_MTBF else "inverse")
-                    k4.metric("平均MTTR", f"{s_mttr} h",
-                              "✓ 達標" if s_mttr <= THRESHOLD_MTTR else f"警戒≤{THRESHOLD_MTTR}h",
-                              delta_color="inverse" if s_mttr > THRESHOLD_MTTR else "normal")
-                    k5.metric("平均可用率", f"{s_avail}%",
-                              "✓ 達標" if s_avail >= THRESHOLD_AVAIL else f"目標≥{THRESHOLD_AVAIL}%",
-                              delta_color="normal" if s_avail >= THRESHOLD_AVAIL else "inverse")
+            # ── 系列代碼彙總表（每列 = 一個系列）──
+            series_list = sorted(dk_type["系列"].unique())
+            tbl_rows = []
+            for sc in series_list:
+                sk = dk_type[dk_type["系列"] == sc]
+                tbl_rows.append({
+                    "系列代碼": sc,
+                    "設備名稱": SERIES_NAME.get(sc, ""),
+                    "台數": sk["機台代碼"].nunique(),
+                    "故障次數": int(sk["故障次數"].sum()),
+                    "停工時數(h)": round(sk["停工時數(h)"].sum(), 2),
+                    "平均MTBF(h)": round(sk["MTBF(h)"].mean(), 2),
+                    "平均MTTR(h)": round(sk["MTTR(h)"].mean(), 2),
+                    "平均可用率(%)": round(sk["可用率(%)"].mean(), 2),
+                    "重複故障台數": int(sk["重複故障"].sum()),
+                })
+            df_tbl = pd.DataFrame(tbl_rows)
 
-                    st.markdown("<br>", unsafe_allow_html=True)
+            if not df_tbl.empty:
+                styled = (df_tbl.style
+                    .map(style_avail_cell, subset=["平均可用率(%)"])
+                    .map(style_failures, subset=["故障次數"])
+                    .format({
+                        "停工時數(h)": "{:.2f}",
+                        "平均MTBF(h)": "{:.2f}",
+                        "平均MTTR(h)": "{:.2f}",
+                        "平均可用率(%)": "{:.2f}",
+                    }))
+                st.dataframe(styled, use_container_width=True, hide_index=True)
 
-                    # 月別摘要表
-                    st.dataframe(
-                        df_s.style.map(style_avail, subset=["平均可用率(%)"]),
-                        use_container_width=True, hide_index=True)
+                # ── 停工時數橫條圖（只顯示有故障的系列）──
+                df_chart = df_tbl[df_tbl["故障次數"] > 0].copy()
+                if not df_chart.empty:
+                    df_chart["系列標籤"] = df_chart["系列代碼"] + " " + df_chart["設備名稱"]
+                    df_chart = df_chart.sort_values("停工時數(h)", ascending=True)
+                    fig_t = go.Figure()
+                    fig_t.add_bar(
+                        x=df_chart["故障次數"],
+                        y=df_chart["系列標籤"],
+                        orientation="h",
+                        name="故障次數",
+                        marker_color=type_color,
+                        opacity=0.85,
+                        text=df_chart["故障次數"],
+                        textposition="outside",
+                        xaxis="x",
+                    )
+                    fig_t.add_scatter(
+                        x=df_chart["停工時數(h)"],
+                        y=df_chart["系列標籤"],
+                        mode="markers",
+                        name="停工時數(h)",
+                        marker=dict(color="#D85A30", size=10, symbol="diamond"),
+                        xaxis="x2",
+                    )
+                    chart_h = max(200, len(df_chart) * 36 + 60)
+                    fig_t.update_layout(
+                        **PLOT_LAYOUT,
+                        height=chart_h,
+                        xaxis=dict(title="故障次數", side="bottom", **GRID),
+                        xaxis2=dict(title="停工時數(h)", overlaying="x", side="top",
+                                    showgrid=False),
+                        yaxis=dict(automargin=True, **GRID),
+                        legend=dict(x=1.02, y=1, orientation="v"),
+                        margin=dict(t=48, b=40, l=180, r=100),
+                    )
+                    st.plotly_chart(fig_t, use_container_width=True)
 
-                    # 月別故障 + 停工雙軸圖
-                    if len(df_s) >= 2:
-                        fig_s = go.Figure()
-                        fig_s.add_bar(x=df_s["月份"], y=df_s["故障次數"], name="故障次數",
-                                      marker_color=type_color, yaxis="y")
-                        fig_s.add_scatter(x=df_s["月份"], y=df_s["停工時數(h)"],
-                                          name="停工時數(h)", mode="lines+markers",
-                                          marker_color="#D85A30", line=dict(width=2), yaxis="y2")
-                        fig_s.update_layout(**PLOT_LAYOUT,
-                            yaxis=dict(title="故障次數", gridcolor='#eae8e1'),
-                            yaxis2=dict(title="停工時數(h)", overlaying="y", side="right"),
-                            legend=dict(x=0, y=1.08, orientation="h"), height=240)
-                        st.plotly_chart(fig_s, use_container_width=True)
+            st.markdown("<br>", unsafe_allow_html=True)
 
     # ══ Tab2：機台明細 ═════════════════════════════════════════════════
     with tab2:
