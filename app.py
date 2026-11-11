@@ -112,7 +112,7 @@ GRID = dict(gridcolor='#eae8e1', linecolor='#eae8e1')
 st.set_page_config(
     page_title="富強醫材｜設備可靠性分析",
     page_icon="🔧", layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # ── 樣式 ─────────────────────────────────────────────────────────────
@@ -428,6 +428,12 @@ def main():
     # ── Sidebar ───────────────────────────────────────────────────────
     with st.sidebar:
         st.header("🔑 管理員更新資料")
+        # 顯示 token 狀態
+        _tok = st.secrets.get("GITHUB_TOKEN", "")
+        if _tok:
+            st.caption(f"🔑 Token: ...{_tok[-6:]}")
+        else:
+            st.error("⚠️ GITHUB_TOKEN 未設定")
         up_file = st.file_uploader("上傳報修 Excel（含時數工作表）",
                                    type=["xlsx"], key="uploader")
 
@@ -476,11 +482,12 @@ def main():
                 }
                 ok, msg = save_data(payload)
                 if ok:
-                    st.success(msg)
+                    st.toast(msg, icon="✅")
                     st.cache_data.clear()
                     st.rerun()
                 else:
-                    st.error(msg)
+                    st.error(f"❌ 儲存失敗：{msg}")
+                    st.stop()
 
         elif stored:
             st.success(f"資料更新時間：{stored.get('updated','—')}")
