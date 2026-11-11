@@ -453,7 +453,15 @@ def main():
                 df_all_new, hours_base_new, err = parse_excel(file_bytes)
             if err:
                 st.error(err)
+            elif df_all_new is None or df_all_new.empty:
+                st.error("❌ 解析失敗：找不到有效資料，請確認 Excel 格式")
             else:
+                # 顯示解析結果預覽
+                series_found = df_all_new["機台代碼"].dropna().apply(
+                    lambda c: re.match(r"(M-\d{3}-\d{3})", str(c)).group(1)
+                    if re.match(r"(M-\d{3}-\d{3})", str(c)) else None
+                ).dropna().unique()
+                st.caption(f"✓ 解析完成：{len(df_all_new)} 筆記錄，系列：{', '.join(sorted(series_found)[:8])}{'…' if len(series_found)>8 else ''}")
                 df_kpi_new = calc_kpi(df_all_new, hours_base_new, special_off)
                 raw_cols = ["月份","機台代碼","機台名稱","系列","設備類型","維修時數","停機","缺料","完工超時"]
                 for col in ["需求","部門","設備名稱"]:
@@ -467,10 +475,12 @@ def main():
                     "raw": df_all_new[raw_cols].to_dict(orient="records"),
                 }
                 ok, msg = save_data(payload)
-                st.info(msg)
                 if ok:
+                    st.success(msg)
                     st.cache_data.clear()
-                    stored = payload
+                    st.rerun()
+                else:
+                    st.error(msg)
 
         elif stored:
             st.success(f"資料更新時間：{stored.get('updated','—')}")
