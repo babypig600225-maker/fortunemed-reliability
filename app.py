@@ -252,14 +252,17 @@ def main():
                 st.error(err)
             else:
                 df_kpi_new = calc_kpi(df_all_new, hours_base_new, special_off)
+                # 只選實際存在的欄位
+                raw_cols = ["月份","機台代碼","機台名稱","系列","維修時數","停機","缺料","完工超時"]
+                for col in ["需求","部門","設備名稱"]:
+                    if col in df_all_new.columns:
+                        raw_cols.append(col)
                 payload = {
                     "updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "hours_base": hours_base_new,
                     "special_off": special_off,
                     "kpi": df_kpi_new.to_dict(orient="records"),
-                    "raw": df_all_new[["月份","機台代碼","機台名稱","系列",
-                                       "故障次數","停機","維修時數","缺料",
-                                       "完工超時","需求","部門"]].to_dict(orient="records"),
+                    "raw": df_all_new[raw_cols].to_dict(orient="records"),
                 }
                 ok, msg = save_data(payload)
                 st.info(msg)
