@@ -911,386 +911,419 @@ def main():
 
         # ── 全局篩選器 ────────────────────────────────────────────────────
         fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 1])
-    with fc1:
-        # 月份：最新月份排最前（方便選最近一個月）
-        months_desc = list(reversed(months_avail))
-        month_opts = ["全部月份"] + months_desc
-        sel_month_single = st.selectbox("月份", month_opts, key="f_month_single")
-        if sel_month_single == "全部月份":
-            sel_months = months_avail
-        else:
-            sel_months = [sel_month_single]
-    with fc2:
-        all_series = sorted(df_kpi["系列"].unique())
-        # 顯示標籤加上中文名稱，如「M-301-005 押出機」
-        series_labels = [f"{s}　{SERIES_NAME[s]}" if s in SERIES_NAME else s for s in all_series]
-        label_to_series = dict(zip(series_labels, all_series))
-        sel_labels = st.multiselect("機台系列", series_labels, default=[], key="f_series")
-        sel_series = [label_to_series[lb] for lb in sel_labels]
-    with fc3:
-        only_stop = st.checkbox("只顯示有停機記錄的機台", key="f_stop")
-    with fc4:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 重設篩選"):
-            st.rerun()
-
-    dk = df_kpi[df_kpi["月份"].isin(sel_months)].copy()
-    dr = df_raw[df_raw["月份"].isin(sel_months)].copy()
-    if sel_series:
-        dk = dk[dk["系列"].isin(sel_series)]
-        dr = dr[dr["系列"].isin(sel_series)]
-    if only_stop:
-        dk = dk[dk["停機次數"] > 0]
-
-    ds = df_summary[df_summary["月份"].isin(sel_months)]
-
-    # ══ 分頁 ═══════════════════════════════════════════════════════════
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["📊 月別總覽", "🔧 機台明細", "⚠️ 故障分析", "📈 趨勢分析"])
-
-    # ══ Tab1：月別總覽（大類 → 系列代碼一覽表）════════════════════════════
-    with tab1:
-        TYPE_COLOR = {"成型類": "#378ADD", "加工類": "#1D9E75", "包裝類": "#BA7517"}
-
-        def style_avail_cell(val):
-            if not isinstance(val, (int, float)): return ""
-            if val >= THRESHOLD_AVAIL: return "color:#1f7a4d;font-weight:600"
-            elif val >= 80: return "color:#7b4f00"
-            return "color:#a32d2d;font-weight:600"
-
-        def style_failures(val):
-            if not isinstance(val, (int, float)): return ""
-            if val == 0: return "color:#888"
-            if val >= 5: return "color:#a32d2d;font-weight:600"
-            return ""
-
-        for eq_type in EQ_TYPE_ORDER:
-            type_color = TYPE_COLOR.get(eq_type, "#378ADD")
-            # 該類所有資料
-            dk_type = dk[dk["設備類型"] == eq_type]
-            if dk_type.empty:
-                continue
-
-            # ── 大類標題 ──
-            st.markdown(
-                f'<div class="type-header" style="background:{type_color}">'
-                f'▌ {eq_type}</div>',
-                unsafe_allow_html=True)
-
-            # ── 大類 KPI 摘要卡 ──
-            k1, k2, k3, k4, k5 = st.columns(5)
-            t_machines = dk_type["機台代碼"].nunique()
-            t_fail  = int(dk_type["故障次數"].sum())
-            t_down  = round(dk_type["停工時數(h)"].sum(), 2)
-            t_mtbf  = round(dk_type["MTBF(h)"].mean(), 2)
-            t_avail = round(dk_type["可用率(%)"].mean(), 2)
-            k1.metric("涉及機台數", f"{t_machines} 台")
-            k2.metric("故障次數", f"{t_fail} 次")
-            k3.metric("總停工時數", f"{t_down} h")
-            k4.metric("平均MTBF", f"{t_mtbf} h",
-                      "✓ 達標" if t_mtbf >= THRESHOLD_MTBF else f"目標≥{THRESHOLD_MTBF}h",
-                      delta_color="normal" if t_mtbf >= THRESHOLD_MTBF else "inverse")
-            k5.metric("平均可用率", f"{t_avail}%",
-                      "✓ 達標" if t_avail >= THRESHOLD_AVAIL else f"目標≥{THRESHOLD_AVAIL}%",
-                      delta_color="normal" if t_avail >= THRESHOLD_AVAIL else "inverse")
-
+        with fc1:
+            # 月份：最新月份排最前（方便選最近一個月）
+            months_desc = list(reversed(months_avail))
+            month_opts = ["全部月份"] + months_desc
+            sel_month_single = st.selectbox("月份", month_opts, key="f_month_single")
+            if sel_month_single == "全部月份":
+                sel_months = months_avail
+            else:
+                sel_months = [sel_month_single]
+        with fc2:
+            all_series = sorted(df_kpi["系列"].unique())
+            # 顯示標籤加上中文名稱，如「M-301-005 押出機」
+            series_labels = [f"{s}　{SERIES_NAME[s]}" if s in SERIES_NAME else s for s in all_series]
+            label_to_series = dict(zip(series_labels, all_series))
+            sel_labels = st.multiselect("機台系列", series_labels, default=[], key="f_series")
+            sel_series = [label_to_series[lb] for lb in sel_labels]
+        with fc3:
+            only_stop = st.checkbox("只顯示有停機記錄的機台", key="f_stop")
+        with fc4:
             st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🔄 重設篩選"):
+                st.rerun()
 
-            # ── 系列代碼彙總表（每列 = 一個系列）──
-            series_list = sorted(dk_type["系列"].unique())
-            tbl_rows = []
-            for sc in series_list:
-                sk = dk_type[dk_type["系列"] == sc]
-                tbl_rows.append({
-                    "系列代碼": sc,
-                    "設備名稱": SERIES_NAME.get(sc, ""),
-                    "台數": sk["機台代碼"].nunique(),
-                    "故障次數": int(sk["故障次數"].sum()),
-                    "停工時數(h)": round(sk["停工時數(h)"].sum(), 2),
-                    "平均MTBF(h)": round(sk["MTBF(h)"].mean(), 2),
-                    "平均MTTR(h)": round(sk["MTTR(h)"].mean(), 2),
-                    "平均可用率(%)": round(sk["可用率(%)"].mean(), 2),
-                    "重複故障台數": int(sk["重複故障"].sum()),
-                })
-            df_tbl = pd.DataFrame(tbl_rows)
+        dk = df_kpi[df_kpi["月份"].isin(sel_months)].copy()
+        dr = df_raw[df_raw["月份"].isin(sel_months)].copy()
+        if sel_series:
+            dk = dk[dk["系列"].isin(sel_series)]
+            dr = dr[dr["系列"].isin(sel_series)]
+        if only_stop:
+            dk = dk[dk["停機次數"] > 0]
 
-            if not df_tbl.empty:
-                styled = (df_tbl.style
-                    .map(style_avail_cell, subset=["平均可用率(%)"])
-                    .map(style_failures, subset=["故障次數"])
-                    .format({
-                        "停工時數(h)": "{:.2f}",
-                        "平均MTBF(h)": "{:.2f}",
-                        "平均MTTR(h)": "{:.2f}",
-                        "平均可用率(%)": "{:.2f}",
-                    }))
-                st.dataframe(styled, use_container_width=True, hide_index=True)
+        ds = df_summary[df_summary["月份"].isin(sel_months)]
 
-                # ── 停工時數橫條圖（只顯示有故障的系列）──
-                df_chart = df_tbl[df_tbl["故障次數"] > 0].copy()
-                if not df_chart.empty:
-                    df_chart["系列標籤"] = df_chart["系列代碼"] + " " + df_chart["設備名稱"]
-                    df_chart = df_chart.sort_values("停工時數(h)", ascending=True)
-                    fig_t = go.Figure()
-                    fig_t.add_bar(
-                        x=df_chart["故障次數"],
-                        y=df_chart["系列標籤"],
-                        orientation="h",
-                        name="故障次數",
-                        marker_color=type_color,
-                        opacity=0.85,
-                        text=df_chart["故障次數"],
-                        textposition="outside",
-                        xaxis="x",
-                    )
-                    fig_t.add_scatter(
-                        x=df_chart["停工時數(h)"],
-                        y=df_chart["系列標籤"],
-                        mode="markers",
-                        name="停工時數(h)",
-                        marker=dict(color="#D85A30", size=10, symbol="diamond"),
-                        xaxis="x2",
-                    )
-                    chart_h = max(200, len(df_chart) * 36 + 60)
-                    fig_t.update_layout(**{
-                        **PLOT_LAYOUT,
-                        "height": chart_h,
-                        "xaxis": dict(title="故障次數", side="bottom", **GRID),
-                        "xaxis2": dict(title="停工時數(h)", overlaying="x", side="top",
-                                       showgrid=False),
-                        "yaxis": dict(automargin=True, **GRID),
-                        "legend": dict(x=1.02, y=1, orientation="v"),
-                        "margin": dict(t=48, b=40, l=180, r=100),
-                    })
-                    st.plotly_chart(fig_t, use_container_width=True)
+        # ══ 分頁 ═══════════════════════════════════════════════════════════
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["📊 月別總覽", "🔧 機台明細", "⚠️ 故障分析", "📈 趨勢分析"])
 
-            st.markdown("<br>", unsafe_allow_html=True)
+        # ══ Tab1：月別總覽（大類 → 系列代碼一覽表）════════════════════════════
+        with tab1:
+            TYPE_COLOR = {"成型類": "#378ADD", "加工類": "#1D9E75", "包裝類": "#BA7517"}
 
-    # ══ Tab2：機台明細 ═════════════════════════════════════════════════
-    with tab2:
-        st.markdown('<div class="section-title">機台明細 — MTBF / MTTR / 可用率</div>',
+            def style_avail_cell(val):
+                if not isinstance(val, (int, float)): return ""
+                if val >= THRESHOLD_AVAIL: return "color:#1f7a4d;font-weight:600"
+                elif val >= 80: return "color:#7b4f00"
+                return "color:#a32d2d;font-weight:600"
+
+            def style_failures(val):
+                if not isinstance(val, (int, float)): return ""
+                if val == 0: return "color:#888"
+                if val >= 5: return "color:#a32d2d;font-weight:600"
+                return ""
+
+            for eq_type in EQ_TYPE_ORDER:
+                type_color = TYPE_COLOR.get(eq_type, "#378ADD")
+                # 該類所有資料
+                dk_type = dk[dk["設備類型"] == eq_type]
+                if dk_type.empty:
+                    continue
+
+                # ── 大類標題 ──
+                st.markdown(
+                    f'<div class="type-header" style="background:{type_color}">'
+                    f'▌ {eq_type}</div>',
                     unsafe_allow_html=True)
 
-        agg = dk.groupby(["機台代碼","機台名稱","系列","設備類型"]).agg(
-            故障次數=("故障次數","sum"),
-            停機次數=("停機次數","sum"),
-            停工時數=("停工時數(h)","sum"),
-            總維修時數=("總維修時數(h)","sum"),
-            平均MTBF=("MTBF(h)","mean"),
-            平均MTTR=("MTTR(h)","mean"),
-            平均可用率=("可用率(%)","mean"),
-            重複故障月數=("重複故障","sum"),
-        ).reset_index().round(2)
-        agg = agg.sort_values("停工時數", ascending=False)
+                # ── 大類 KPI 摘要卡 ──
+                k1, k2, k3, k4, k5 = st.columns(5)
+                t_machines = dk_type["機台代碼"].nunique()
+                t_fail  = int(dk_type["故障次數"].sum())
+                t_down  = round(dk_type["停工時數(h)"].sum(), 2)
+                t_mtbf  = round(dk_type["MTBF(h)"].mean(), 2)
+                t_avail = round(dk_type["可用率(%)"].mean(), 2)
+                k1.metric("涉及機台數", f"{t_machines} 台")
+                k2.metric("故障次數", f"{t_fail} 次")
+                k3.metric("總停工時數", f"{t_down} h")
+                k4.metric("平均MTBF", f"{t_mtbf} h",
+                          "✓ 達標" if t_mtbf >= THRESHOLD_MTBF else f"目標≥{THRESHOLD_MTBF}h",
+                          delta_color="normal" if t_mtbf >= THRESHOLD_MTBF else "inverse")
+                k5.metric("平均可用率", f"{t_avail}%",
+                          "✓ 達標" if t_avail >= THRESHOLD_AVAIL else f"目標≥{THRESHOLD_AVAIL}%",
+                          delta_color="normal" if t_avail >= THRESHOLD_AVAIL else "inverse")
 
-        def color_avail(val):
-            if not isinstance(val, (int, float)): return ""
-            if val >= THRESHOLD_AVAIL: return "background-color:#e2efda"
-            elif val >= 80: return "background-color:#fff2cc"
-            return "background-color:#fcebeb"
+                st.markdown("<br>", unsafe_allow_html=True)
 
-        st.dataframe(
-            agg.style
-               .map(color_avail, subset=["平均可用率"])
-               .format({
-                   "停工時數":  "{:.2f}",
-                   "總維修時數": "{:.2f}",
-                   "平均MTBF":  "{:.2f}",
-                   "平均MTTR":  "{:.2f}",
-                   "平均可用率": "{:.2f}",
-               }),
-            use_container_width=True, hide_index=True)
+                # ── 系列代碼彙總表（每列 = 一個系列）──
+                series_list = sorted(dk_type["系列"].unique())
+                tbl_rows = []
+                for sc in series_list:
+                    sk = dk_type[dk_type["系列"] == sc]
+                    tbl_rows.append({
+                        "系列代碼": sc,
+                        "設備名稱": SERIES_NAME.get(sc, ""),
+                        "台數": sk["機台代碼"].nunique(),
+                        "故障次數": int(sk["故障次數"].sum()),
+                        "停工時數(h)": round(sk["停工時數(h)"].sum(), 2),
+                        "平均MTBF(h)": round(sk["MTBF(h)"].mean(), 2),
+                        "平均MTTR(h)": round(sk["MTTR(h)"].mean(), 2),
+                        "平均可用率(%)": round(sk["可用率(%)"].mean(), 2),
+                        "重複故障台數": int(sk["重複故障"].sum()),
+                    })
+                df_tbl = pd.DataFrame(tbl_rows)
 
-        st.markdown("---")
-        sel_m = st.selectbox("查看單台月別明細", ["— 選擇機台 —"] + list(agg["機台代碼"]))
-        if sel_m != "— 選擇機台 —":
-            dm = dk[dk["機台代碼"] == sel_m].sort_values(
-                "月份", key=lambda x: x.map({m:i for i,m in enumerate(MONTH_ORDER)}))
-            float_cols_dm = ["停工時數(h)", "MTBF(h)", "MTTR(h)", "可用率(%)"]
+                if not df_tbl.empty:
+                    styled = (df_tbl.style
+                        .map(style_avail_cell, subset=["平均可用率(%)"])
+                        .map(style_failures, subset=["故障次數"])
+                        .format({
+                            "停工時數(h)": "{:.2f}",
+                            "平均MTBF(h)": "{:.2f}",
+                            "平均MTTR(h)": "{:.2f}",
+                            "平均可用率(%)": "{:.2f}",
+                        }))
+                    st.dataframe(styled, use_container_width=True, hide_index=True)
+
+                    # ── 停工時數橫條圖（只顯示有故障的系列）──
+                    df_chart = df_tbl[df_tbl["故障次數"] > 0].copy()
+                    if not df_chart.empty:
+                        df_chart["系列標籤"] = df_chart["系列代碼"] + " " + df_chart["設備名稱"]
+                        df_chart = df_chart.sort_values("停工時數(h)", ascending=True)
+                        fig_t = go.Figure()
+                        fig_t.add_bar(
+                            x=df_chart["故障次數"],
+                            y=df_chart["系列標籤"],
+                            orientation="h",
+                            name="故障次數",
+                            marker_color=type_color,
+                            opacity=0.85,
+                            text=df_chart["故障次數"],
+                            textposition="outside",
+                            xaxis="x",
+                        )
+                        fig_t.add_scatter(
+                            x=df_chart["停工時數(h)"],
+                            y=df_chart["系列標籤"],
+                            mode="markers",
+                            name="停工時數(h)",
+                            marker=dict(color="#D85A30", size=10, symbol="diamond"),
+                            xaxis="x2",
+                        )
+                        chart_h = max(200, len(df_chart) * 36 + 60)
+                        fig_t.update_layout(**{
+                            **PLOT_LAYOUT,
+                            "height": chart_h,
+                            "xaxis": dict(title="故障次數", side="bottom", **GRID),
+                            "xaxis2": dict(title="停工時數(h)", overlaying="x", side="top",
+                                           showgrid=False),
+                            "yaxis": dict(automargin=True, **GRID),
+                            "legend": dict(x=1.02, y=1, orientation="v"),
+                            "margin": dict(t=48, b=40, l=180, r=100),
+                        })
+                        st.plotly_chart(fig_t, use_container_width=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+        # ══ Tab2：機台明細 ═════════════════════════════════════════════════
+        with tab2:
+            st.markdown('<div class="section-title">機台明細 — MTBF / MTTR / 可用率</div>',
+                        unsafe_allow_html=True)
+
+            agg = dk.groupby(["機台代碼","機台名稱","系列","設備類型"]).agg(
+                故障次數=("故障次數","sum"),
+                停機次數=("停機次數","sum"),
+                停工時數=("停工時數(h)","sum"),
+                總維修時數=("總維修時數(h)","sum"),
+                平均MTBF=("MTBF(h)","mean"),
+                平均MTTR=("MTTR(h)","mean"),
+                平均可用率=("可用率(%)","mean"),
+                重複故障月數=("重複故障","sum"),
+            ).reset_index().round(2)
+            agg = agg.sort_values("停工時數", ascending=False)
+
+            def color_avail(val):
+                if not isinstance(val, (int, float)): return ""
+                if val >= THRESHOLD_AVAIL: return "background-color:#e2efda"
+                elif val >= 80: return "background-color:#fff2cc"
+                return "background-color:#fcebeb"
+
             st.dataframe(
-                dm[["月份","故障次數","停機次數","停工時數(h)","MTBF(h)","MTTR(h)","可用率(%)"]
-                  ].style.format({c: "{:.2f}" for c in float_cols_dm}),
+                agg.style
+                   .map(color_avail, subset=["平均可用率"])
+                   .format({
+                       "停工時數":  "{:.2f}",
+                       "總維修時數": "{:.2f}",
+                       "平均MTBF":  "{:.2f}",
+                       "平均MTTR":  "{:.2f}",
+                       "平均可用率": "{:.2f}",
+                   }),
                 use_container_width=True, hide_index=True)
 
-    # ══ Tab3：故障分析 ═════════════════════════════════════════════════
-    with tab3:
-        c1, c2 = st.columns(2)
+            st.markdown("---")
+            sel_m = st.selectbox("查看單台月別明細", ["— 選擇機台 —"] + list(agg["機台代碼"]))
+            if sel_m != "— 選擇機台 —":
+                dm = dk[dk["機台代碼"] == sel_m].sort_values(
+                    "月份", key=lambda x: x.map({m:i for i,m in enumerate(MONTH_ORDER)}))
+                float_cols_dm = ["停工時數(h)", "MTBF(h)", "MTTR(h)", "可用率(%)"]
+                st.dataframe(
+                    dm[["月份","故障次數","停機次數","停工時數(h)","MTBF(h)","MTTR(h)","可用率(%)"]
+                      ].style.format({c: "{:.2f}" for c in float_cols_dm}),
+                    use_container_width=True, hide_index=True)
 
-        with c1:
-            st.markdown('<div class="section-title">⬛ Top 10 停工時數（機台）</div>',
+        # ══ Tab3：故障分析 ═════════════════════════════════════════════════
+        with tab3:
+            c1, c2 = st.columns(2)
+
+            with c1:
+                st.markdown('<div class="section-title">⬛ Top 10 停工時數（機台）</div>',
+                            unsafe_allow_html=True)
+                top10 = dk.groupby(["機台代碼","機台名稱"])["停工時數(h)"].sum()\
+                          .reset_index().nlargest(10,"停工時數(h)")
+                top10["停工時數(h)"] = top10["停工時數(h)"].round(2)
+                top10 = top10[top10["停工時數(h)"] > 0]
+                fig2 = go.Figure(go.Bar(
+                    x=top10["停工時數(h)"], y=top10["機台代碼"],
+                    orientation="h", text=top10["停工時數(h)"],
+                    marker_color="#D85A30", opacity=0.85,
+                    hovertext=top10["機台名稱"]))
+                fig2.update_layout(**PLOT_LAYOUT, height=340,
+                    yaxis=dict(autorange="reversed", gridcolor='#eae8e1'),
+                    title=dict(text="停工時數 TOP 10", font_size=13, x=0))
+                st.plotly_chart(fig2, use_container_width=True)
+
+            with c2:
+                st.markdown('<div class="section-title">🔁 Top 10 故障次數（機台）</div>',
+                            unsafe_allow_html=True)
+                top10f = dk.groupby(["機台代碼","機台名稱"])["故障次數"].sum()\
+                           .reset_index().nlargest(10,"故障次數")
+                top10f = top10f[top10f["故障次數"] > 0]
+                fig3 = go.Figure(go.Bar(
+                    x=top10f["故障次數"], y=top10f["機台代碼"],
+                    orientation="h", text=top10f["故障次數"],
+                    marker_color="#378ADD", opacity=0.85,
+                    customdata=top10f["機台名稱"],
+                    hovertemplate="%{y}<br>%{customdata}<br>故障 %{x} 次<br><i>點擊查看故障原因</i><extra></extra>"))
+                fig3.update_layout(**PLOT_LAYOUT, height=340,
+                    yaxis=dict(autorange="reversed", gridcolor='#eae8e1'),
+                    title=dict(text="故障次數 TOP 10（點長條看故障原因）", font_size=13, x=0),
+                    clickmode="event+select")
+                ev = st.plotly_chart(fig3, use_container_width=True,
+                                     on_select="rerun", selection_mode="points",
+                                     key="top10_fault_chart")
+
+                # 點選後帶出故障原因
+                pts = (ev.get("selection", {}) or {}).get("points", []) if ev else []
+                if pts:
+                    sel_code = pts[0].get("y")
+                    sel_name = SERIES_NAME.get(
+                        re.sub(r"^(M-\d{3}-\d{3}).*$", r"\1", str(sel_code)), "")
+                    recs = dr[dr["機台代碼"] == sel_code].copy()
+                    st.markdown(f"**🔍 {sel_code}　{sel_name}　故障原因（{len(recs)} 筆）**")
+                    if recs.empty or "需求" not in recs.columns:
+                        st.info("無故障原因資料")
+                    else:
+                        recs["_o"] = recs["月份"].map(
+                            {m: i for i, m in enumerate(MONTH_ORDER)})
+                        show_cols = [c for c in ["月份", "需求", "維修時數", "停機"]
+                                     if c in recs.columns]
+                        out = recs.sort_values("_o")[show_cols].rename(
+                            columns={"需求": "故障原因", "維修時數": "維修時數(h)"})
+                        out["故障原因"] = out["故障原因"].fillna("無資料").replace("", "無資料")
+                        if "停機" in out.columns:
+                            out["停機"] = out["停機"].map(
+                                lambda v: "是" if v in (1, True, "1", "是", "Y") else "否")
+                        fmt = {"維修時數(h)": "{:.2f}"} if "維修時數(h)" in out.columns else {}
+                        st.dataframe(out.style.format(fmt, na_rep="無資料"),
+                                     use_container_width=True, hide_index=True)
+                else:
+                    st.caption("👆 點選上方長條即可查看該機台的故障原因")
+
+            st.markdown("---")
+            c3, c4 = st.columns(2)
+
+            with c3:
+                st.markdown('<div class="section-title">⚠️ 重複故障機台（同月 ≥ 2 次）</div>',
+                            unsafe_allow_html=True)
+                repeat = dk[dk["重複故障"] == 1].groupby(["機台代碼","機台名稱"])\
+                           .agg(發生月數=("月份","nunique"),
+                                累計故障次數=("故障次數","sum")).reset_index()
+                st.dataframe(repeat.sort_values("發生月數", ascending=False),
+                             use_container_width=True, hide_index=True)
+
+            with c4:
+                st.markdown('<div class="section-title">📋 故障原因分類</div>',
+                            unsafe_allow_html=True)
+                if "需求" in dr.columns:
+                    keywords = {
+                        "溫度異常": ["溫度","過熱","溫控"],
+                        "漏油/漏水": ["漏油","漏水","滲油"],
+                        "電氣/電線": ["電線","電路","跳電","斷電","短路","感溫線"],
+                        "機械磨損": ["斷裂","磨損","螺絲","異音","鬆脫"],
+                        "感測/控制": ["感應","感測","PLC","電磁閥"],
+                        "無法啟動": ["無法啟動","無法使用","無法運作"],
+                        "保養/更換": ["保養","更換","清洗"],
+                        "其他": [],
+                    }
+                    cat_counts = {}
+                    matched = set()
+                    for cat, kws in keywords.items():
+                        if cat == "其他": continue
+                        mask = dr["需求"].astype(str).apply(lambda x: any(k in x for k in kws))
+                        idxs = dr[mask].index.tolist()
+                        cat_counts[cat] = len([i for i in idxs if i not in matched])
+                        matched.update(idxs)
+                    cat_counts["其他"] = len(dr) - sum(cat_counts.values())
+
+                    df_cat = pd.DataFrame(list(cat_counts.items()),
+                                          columns=["故障類別","件數"])\
+                               .sort_values("件數", ascending=False)
+                    fig4 = px.pie(df_cat, names="故障類別", values="件數",
+                                  color_discrete_sequence=CHART_COLORS)
+                    fig4.update_layout(height=320, margin=dict(t=10,b=10),
+                                       paper_bgcolor='white')
+                    st.plotly_chart(fig4, use_container_width=True)
+                else:
+                    st.info("無需求欄位資料")
+
+            # 缺料
+            st.markdown("---")
+            st.markdown('<div class="section-title">📦 缺料統計（月別）</div>',
                         unsafe_allow_html=True)
-            top10 = dk.groupby(["機台代碼","機台名稱"])["停工時數(h)"].sum()\
-                      .reset_index().nlargest(10,"停工時數(h)")
-            top10["停工時數(h)"] = top10["停工時數(h)"].round(2)
-            fig2 = go.Figure(go.Bar(
-                x=top10["停工時數(h)"], y=top10["機台代碼"],
-                orientation="h", text=top10["停工時數(h)"],
-                marker_color="#D85A30", opacity=0.85,
-                hovertext=top10["機台名稱"]))
-            fig2.update_layout(**PLOT_LAYOUT, height=340,
-                yaxis=dict(autorange="reversed", gridcolor='#eae8e1'),
-                title=dict(text="停工時數 TOP 10", font_size=13, x=0))
-            st.plotly_chart(fig2, use_container_width=True)
+            shortage_m = dk.groupby("月份")["缺料件數"].sum().reset_index()
+            shortage_m = shortage_m.sort_values("月份", key=lambda x: x.map(
+                {m:i for i,m in enumerate(MONTH_ORDER)}))
+            fig5 = go.Figure(go.Bar(x=shortage_m["月份"], y=shortage_m["缺料件數"],
+                                    text=shortage_m["缺料件數"], marker_color="#BA7517", opacity=0.85))
+            fig5.update_layout(**PLOT_LAYOUT, height=260,
+                title=dict(text="缺料件數", font_size=13, x=0))
+            st.plotly_chart(fig5, use_container_width=True)
 
-        with c2:
-            st.markdown('<div class="section-title">🔁 Top 10 故障次數（機台）</div>',
+        # ══ Tab4：趨勢分析 ════════════════════════════════════════════════
+        with tab4:
+            ds2 = df_summary[df_summary["月份"].isin(sel_months)].sort_values(
+                "月份", key=lambda x: x.map({m:i for i,m in enumerate(MONTH_ORDER)}))
+
+            c1, c2 = st.columns(2)
+
+            with c1:
+                st.markdown('<div class="section-title">MTBF / MTTR 月別趨勢</div>',
+                            unsafe_allow_html=True)
+                fig6 = go.Figure()
+                fig6.add_scatter(x=ds2["月份"], y=ds2["平均MTBF(h)"],
+                                 name="平均MTBF(h)", mode="lines+markers",
+                                 line=dict(color="#378ADD", width=2), marker=dict(size=7))
+                fig6.add_scatter(x=ds2["月份"], y=ds2["平均MTTR(h)"],
+                                 name="平均MTTR(h)", mode="lines+markers",
+                                 line=dict(color="#D85A30", width=2), marker=dict(size=7),
+                                 yaxis="y2")
+                fig6.add_hline(y=THRESHOLD_MTBF, line_dash="dash", line_color="#378ADD",
+                               annotation_text=f"MTBF目標 {THRESHOLD_MTBF}h")
+                fig6.update_layout(**PLOT_LAYOUT,
+                    yaxis=dict(title="MTBF(h)", gridcolor='#eae8e1'),
+                    yaxis2=dict(title="MTTR(h)", overlaying="y", side="right"),
+                    legend=dict(x=0, y=1.08, orientation="h"), height=320)
+                st.plotly_chart(fig6, use_container_width=True)
+
+            with c2:
+                st.markdown('<div class="section-title">平均可用率趨勢</div>',
+                            unsafe_allow_html=True)
+                fig7 = go.Figure()
+                fig7.add_scatter(x=ds2["月份"], y=ds2["平均可用率(%)"],
+                                 mode="lines+markers",
+                                 line=dict(color="#1D9E75", width=2), marker=dict(size=7),
+                                 fill="tozeroy", fillcolor="rgba(29,158,117,0.08)")
+                fig7.add_hline(y=THRESHOLD_AVAIL, line_dash="dash", line_color="#BA7517",
+                               annotation_text=f"目標 {THRESHOLD_AVAIL}%")
+                fig7.update_layout(**PLOT_LAYOUT, height=320,
+                    yaxis=dict(title="可用率(%)", range=[0,110], gridcolor='#eae8e1'))
+                st.plotly_chart(fig7, use_container_width=True)
+
+            # 熱圖 — 分三大類
+            st.markdown('<div class="section-title">機台系列 × 月份 — 可用率熱圖</div>',
                         unsafe_allow_html=True)
-            top10f = dk.groupby(["機台代碼","機台名稱"])["故障次數"].sum()\
-                       .reset_index().nlargest(10,"故障次數")
-            fig3 = go.Figure(go.Bar(
-                x=top10f["故障次數"], y=top10f["機台代碼"],
-                orientation="h", text=top10f["故障次數"],
-                marker_color="#378ADD", opacity=0.85,
-                hovertext=top10f["機台名稱"]))
-            fig3.update_layout(**PLOT_LAYOUT, height=340,
-                yaxis=dict(autorange="reversed", gridcolor='#eae8e1'),
-                title=dict(text="故障次數 TOP 10", font_size=13, x=0))
-            st.plotly_chart(fig3, use_container_width=True)
-
-        st.markdown("---")
-        c3, c4 = st.columns(2)
-
-        with c3:
-            st.markdown('<div class="section-title">⚠️ 重複故障機台（同月 ≥ 2 次）</div>',
-                        unsafe_allow_html=True)
-            repeat = dk[dk["重複故障"] == 1].groupby(["機台代碼","機台名稱"])\
-                       .agg(發生月數=("月份","nunique"),
-                            累計故障次數=("故障次數","sum")).reset_index()
-            st.dataframe(repeat.sort_values("發生月數", ascending=False),
-                         use_container_width=True, hide_index=True)
-
-        with c4:
-            st.markdown('<div class="section-title">📋 故障原因分類</div>',
-                        unsafe_allow_html=True)
-            if "需求" in dr.columns:
-                keywords = {
-                    "溫度異常": ["溫度","過熱","溫控"],
-                    "漏油/漏水": ["漏油","漏水","滲油"],
-                    "電氣/電線": ["電線","電路","跳電","斷電","短路","感溫線"],
-                    "機械磨損": ["斷裂","磨損","螺絲","異音","鬆脫"],
-                    "感測/控制": ["感應","感測","PLC","電磁閥"],
-                    "無法啟動": ["無法啟動","無法使用","無法運作"],
-                    "保養/更換": ["保養","更換","清洗"],
-                    "其他": [],
-                }
-                cat_counts = {}
-                matched = set()
-                for cat, kws in keywords.items():
-                    if cat == "其他": continue
-                    mask = dr["需求"].astype(str).apply(lambda x: any(k in x for k in kws))
-                    idxs = dr[mask].index.tolist()
-                    cat_counts[cat] = len([i for i in idxs if i not in matched])
-                    matched.update(idxs)
-                cat_counts["其他"] = len(dr) - sum(cat_counts.values())
-
-                df_cat = pd.DataFrame(list(cat_counts.items()),
-                                      columns=["故障類別","件數"])\
-                           .sort_values("件數", ascending=False)
-                fig4 = px.pie(df_cat, names="故障類別", values="件數",
-                              color_discrete_sequence=CHART_COLORS)
-                fig4.update_layout(height=320, margin=dict(t=10,b=10),
-                                   paper_bgcolor='white')
-                st.plotly_chart(fig4, use_container_width=True)
-            else:
-                st.info("無需求欄位資料")
-
-        # 缺料
-        st.markdown("---")
-        st.markdown('<div class="section-title">📦 缺料統計（月別）</div>',
-                    unsafe_allow_html=True)
-        shortage_m = dk.groupby("月份")["缺料件數"].sum().reset_index()
-        shortage_m = shortage_m.sort_values("月份", key=lambda x: x.map(
-            {m:i for i,m in enumerate(MONTH_ORDER)}))
-        fig5 = go.Figure(go.Bar(x=shortage_m["月份"], y=shortage_m["缺料件數"],
-                                text=shortage_m["缺料件數"], marker_color="#BA7517", opacity=0.85))
-        fig5.update_layout(**PLOT_LAYOUT, height=260,
-            title=dict(text="缺料件數", font_size=13, x=0))
-        st.plotly_chart(fig5, use_container_width=True)
-
-    # ══ Tab4：趨勢分析 ════════════════════════════════════════════════
-    with tab4:
-        ds2 = df_summary[df_summary["月份"].isin(sel_months)].sort_values(
-            "月份", key=lambda x: x.map({m:i for i,m in enumerate(MONTH_ORDER)}))
-
-        c1, c2 = st.columns(2)
-
-        with c1:
-            st.markdown('<div class="section-title">MTBF / MTTR 月別趨勢</div>',
-                        unsafe_allow_html=True)
-            fig6 = go.Figure()
-            fig6.add_scatter(x=ds2["月份"], y=ds2["平均MTBF(h)"],
-                             name="平均MTBF(h)", mode="lines+markers",
-                             line=dict(color="#378ADD", width=2), marker=dict(size=7))
-            fig6.add_scatter(x=ds2["月份"], y=ds2["平均MTTR(h)"],
-                             name="平均MTTR(h)", mode="lines+markers",
-                             line=dict(color="#D85A30", width=2), marker=dict(size=7),
-                             yaxis="y2")
-            fig6.add_hline(y=THRESHOLD_MTBF, line_dash="dash", line_color="#378ADD",
-                           annotation_text=f"MTBF目標 {THRESHOLD_MTBF}h")
-            fig6.update_layout(**PLOT_LAYOUT,
-                yaxis=dict(title="MTBF(h)", gridcolor='#eae8e1'),
-                yaxis2=dict(title="MTTR(h)", overlaying="y", side="right"),
-                legend=dict(x=0, y=1.08, orientation="h"), height=320)
-            st.plotly_chart(fig6, use_container_width=True)
-
-        with c2:
-            st.markdown('<div class="section-title">平均可用率趨勢</div>',
-                        unsafe_allow_html=True)
-            fig7 = go.Figure()
-            fig7.add_scatter(x=ds2["月份"], y=ds2["平均可用率(%)"],
-                             mode="lines+markers",
-                             line=dict(color="#1D9E75", width=2), marker=dict(size=7),
-                             fill="tozeroy", fillcolor="rgba(29,158,117,0.08)")
-            fig7.add_hline(y=THRESHOLD_AVAIL, line_dash="dash", line_color="#BA7517",
-                           annotation_text=f"目標 {THRESHOLD_AVAIL}%")
-            fig7.update_layout(**PLOT_LAYOUT, height=320,
-                yaxis=dict(title="可用率(%)", range=[0,110], gridcolor='#eae8e1'))
-            st.plotly_chart(fig7, use_container_width=True)
-
-        # 熱圖 — 分三大類
-        st.markdown('<div class="section-title">機台系列 × 月份 — 可用率熱圖</div>',
-                    unsafe_allow_html=True)
-        # 色階說明
-        st.markdown(
-            '<div style="display:flex;gap:16px;margin:4px 0 12px;font-size:13px;">'
-            '<span style="background:#fcebeb;padding:3px 10px;border-radius:4px;'
-            'color:#a32d2d;font-weight:600;">🟥 ＜80%　警示</span>'
-            '<span style="background:#fff2cc;padding:3px 10px;border-radius:4px;'
-            'color:#7b4f00;font-weight:600;">🟨 80–94%　偏低</span>'
-            '<span style="background:#e2efda;padding:3px 10px;border-radius:4px;'
-            'color:#1f7a4d;font-weight:600;">🟩 ≥95%　良好</span>'
-            '<span style="color:#888;padding:3px 0;">（格內數字為平均可用率 %）</span>'
-            '</div>',
-            unsafe_allow_html=True)
-        TYPE_COLOR_HM = {"成型類": "#378ADD", "加工類": "#1D9E75", "包裝類": "#BA7517"}
-        for eq_type in EQ_TYPE_ORDER:
-            dk_hm = dk[dk["設備類型"] == eq_type]
-            if dk_hm.empty:
-                continue
-            type_color = TYPE_COLOR_HM.get(eq_type, "#378ADD")
+            # 色階說明
             st.markdown(
-                f'<div style="font-size:14px;font-weight:700;color:{type_color};'
-                f'margin:16px 0 6px;padding-left:8px;border-left:4px solid {type_color}">'
-                f'{eq_type}</div>', unsafe_allow_html=True)
-            pivot = dk_hm.pivot_table(values="可用率(%)",
-                                      index="系列", columns="月份", aggfunc="mean").round(2)
-            ordered_cols = [c for c in MONTH_ORDER if c in pivot.columns]
-            pivot = pivot[ordered_cols]
-            # 短月份標籤
-            pivot.columns = [c.replace("2026-", "") for c in pivot.columns]
-            fig_hm = px.imshow(pivot, text_auto=".1f", aspect="auto",
-                               color_continuous_scale=["#fcebeb","#fff2cc","#e2efda"],
-                               zmin=70, zmax=100)
-            fig_hm.update_layout(
-                height=max(200, len(pivot) * 38 + 60),
-                margin=dict(t=10, b=10, l=130, r=60),
-                paper_bgcolor='white', plot_bgcolor='white',
-                coloraxis_showscale=False,
-                font=dict(size=13),
-            )
-            fig_hm.update_xaxes(side="bottom", tickangle=0, tickfont=dict(size=13))
-            fig_hm.update_yaxes(tickfont=dict(size=13))
-            st.plotly_chart(fig_hm, use_container_width=True)
+                '<div style="display:flex;gap:16px;margin:4px 0 12px;font-size:13px;">'
+                '<span style="background:#fcebeb;padding:3px 10px;border-radius:4px;'
+                'color:#a32d2d;font-weight:600;">🟥 ＜80%　警示</span>'
+                '<span style="background:#fff2cc;padding:3px 10px;border-radius:4px;'
+                'color:#7b4f00;font-weight:600;">🟨 80–94%　偏低</span>'
+                '<span style="background:#e2efda;padding:3px 10px;border-radius:4px;'
+                'color:#1f7a4d;font-weight:600;">🟩 ≥95%　良好</span>'
+                '<span style="color:#888;padding:3px 0;">（格內數字為平均可用率 %）</span>'
+                '</div>',
+                unsafe_allow_html=True)
+            TYPE_COLOR_HM = {"成型類": "#378ADD", "加工類": "#1D9E75", "包裝類": "#BA7517"}
+            for eq_type in EQ_TYPE_ORDER:
+                dk_hm = dk[dk["設備類型"] == eq_type]
+                if dk_hm.empty:
+                    continue
+                type_color = TYPE_COLOR_HM.get(eq_type, "#378ADD")
+                st.markdown(
+                    f'<div style="font-size:14px;font-weight:700;color:{type_color};'
+                    f'margin:16px 0 6px;padding-left:8px;border-left:4px solid {type_color}">'
+                    f'{eq_type}</div>', unsafe_allow_html=True)
+                pivot = dk_hm.pivot_table(values="可用率(%)",
+                                          index="系列", columns="月份", aggfunc="mean").round(2)
+                ordered_cols = [c for c in MONTH_ORDER if c in pivot.columns]
+                pivot = pivot[ordered_cols]
+                # 短月份標籤
+                pivot.columns = [c.replace("2026-", "") for c in pivot.columns]
+                fig_hm = px.imshow(pivot, text_auto=".1f", aspect="auto",
+                                   color_continuous_scale=["#fcebeb","#fff2cc","#e2efda"],
+                                   zmin=70, zmax=100)
+                fig_hm.update_layout(
+                    height=max(200, len(pivot) * 38 + 60),
+                    margin=dict(t=10, b=10, l=130, r=60),
+                    paper_bgcolor='white', plot_bgcolor='white',
+                    coloraxis_showscale=False,
+                    font=dict(size=13),
+                )
+                fig_hm.update_xaxes(side="bottom", tickangle=0, tickfont=dict(size=13))
+                fig_hm.update_yaxes(tickfont=dict(size=13))
+                st.plotly_chart(fig_hm, use_container_width=True)
 
         st.markdown("---")
         st.caption("富強醫材股份有限公司 設備課　© 2026")
