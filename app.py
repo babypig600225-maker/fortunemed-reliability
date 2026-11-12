@@ -817,19 +817,21 @@ def main():
     # ── HTML 自訂儀表板（與稼動率相同風格）──────────────────────────────
     dash_data = build_dashboard_json(df_kpi, hours_base, special_off,
                                      updated=stored.get("updated", ""))
-    render_html_dashboard(dash_data)
-    st.markdown("---")
-    st.markdown("#### 📋 詳細分析（篩選器 + 原始資料）")
 
-    # ── 資訊列 ──
-    m_range = f"{months_avail[0].replace('2026-','')} – {months_avail[-1].replace('2026-','')}" if months_avail else ""
-    info_col = st.container()
-    with info_col:
+    # ══ 頂層分頁：視覺化總覽 ／ 詳細分析 ══════════════════════════════════
+    main_tab1, main_tab2 = st.tabs(["📊 視覺化總覽", "📋 詳細分析"])
+
+    with main_tab1:
+        render_html_dashboard(dash_data)
+
+    with main_tab2:
+        # ── 資訊列 ──
+        m_range = f"{months_avail[0].replace('2026-','')} – {months_avail[-1].replace('2026-','')}" if months_avail else ""
         st.caption(f"📅 2026年 {m_range}　｜　資料更新：{stored.get('updated','—')}")
-    st.divider()
+        st.divider()
 
-    # ── 全局篩選器 ────────────────────────────────────────────────────
-    fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 1])
+        # ── 全局篩選器 ────────────────────────────────────────────────────
+        fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 1])
     with fc1:
         # 月份：最新月份排最前（方便選最近一個月）
         months_desc = list(reversed(months_avail))
@@ -1211,8 +1213,8 @@ def main():
             fig_hm.update_yaxes(tickfont=dict(size=13))
             st.plotly_chart(fig_hm, use_container_width=True)
 
-    st.markdown("---")
-    st.caption("富強醫材股份有限公司 設備課　© 2026")
+        st.markdown("---")
+        st.caption("富強醫材股份有限公司 設備課　© 2026")
 
 if __name__ == "__main__":
     main()
