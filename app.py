@@ -22,6 +22,20 @@ THRESHOLD_AVAIL  = 85.0
 THRESHOLD_MTBF   = 100.0
 THRESHOLD_MTTR   = 8.0
 
+# 非故障報修單（保留紀錄，但不計入故障次數 / 維修工時 / 停工）
+ROUTINE_KEYWORDS = ["更換環氧乙烷", "鋼瓶"]
+
+def nonfault_reason(row):
+    """回傳非故障類別；空字串＝故障"""
+    need = str(row.get("需求", "") or "")
+    if any(k in need for k in ROUTINE_KEYWORDS):
+        return "例行更換耗材"
+    if str(row.get("新機/改機測試", "") or "").strip() == "*":
+        return "新機/改機測試"
+    if str(row.get("製程", "") or "").strip() == "*":
+        return "製程調整"
+    return ""
+
 MONTH_ORDER = [f"2026-{m}月" for m in
                ["1","2","3","4","5","6","7","8","9","10","11","12"]]
 
@@ -528,6 +542,7 @@ def parse_excel(file_bytes):
             return round(calc_window_hours(r["建立時間"], r["完工時間"]), 2)
         return round(float(r["維修時數"]), 2)
     df_all["停工時數(h)"] = df_all.apply(_rec_down, axis=1)
+    df_all["非故障"] = df_all.apply(nonfault_reason, axis=1)
     df_all["機台名稱"] = df_all["設備名稱"].apply(
         lambda x: re.sub(r"^M-\d{3}-\d{3}-\d+(?:-\d+)*\s*", "", str(x)) if pd.notna(x) else "")
 
@@ -552,6 +567,8 @@ def parse_excel(file_bytes):
 # ── 計算 KPI ──────────────────────────────────────────────────────────
 def calc_kpi(df_all, hours_base, special_off):
     records = []
+    if "非故障" in df_all.columns:
+        df_all = df_all[df_all["非故障"].fillna("") == ""]
     for month, grp in df_all.groupby("月份"):
         base    = hours_base.get(month, 220)
         extra   = special_off.get(month, 0)
@@ -872,10 +889,10 @@ def _num(v, unit=""):
         return "—"
     return f"{v:,.2f}".rstrip("0").rstrip(".") + unit
 
-def render_monthly_analysis(df_kpi, df_raw, months_avail, excluded):
+def render_monthly_analysis(df_kpi, df_raw, months_avail, excluded, nonfault=None):
     st.markdown('<div class="section-title">月度可靠性分析</div>', unsafe_allow_html=True)
     st.caption("系列＝合計法：MTBF＝(在用台數×月標準時數 − 停工合計)÷故障合計，MTTR＝維修工時合計÷故障合計；"
-               "每張報修單算 1 次故障，停工只計「是否停機＝YES」。"
+               "每張報修單算 1 次故障（例行更換耗材、新機/改機測試、製程調整不計），停工只計「是否停機＝YES」。"
                "只計使用中／測試中／驗證中的 M-301／302／303 機台。")
     c1, c2, c3 = st.columns([2, 2, 3])
     month = c1.selectbox("分析月份", list(reversed(months_avail)), key="ma_month")
@@ -973,6 +990,18 @@ def render_monthly_analysis(df_kpi, df_raw, months_avail, excluded):
         use_container_width=True, hide_index=True,
         column_config={"主要故障": st.column_config.TextColumn(width="large")})
 
+    # ── 非故障報修單 ──
+    if nonfault is not None and len(nonfault):
+        nf = nonfault[nonfault["月份"] == month]
+        if typ != "全部":
+            nf = nf[nf["設備類型"] == typ]
+        if len(nf):
+            with st.expander(f"非故障報修單（{len(nf)} 筆：例行更換耗材、新機/改機測試、製程調整，不計入故障）"):
+                cols = [c for c in ["非故障", "seq", "機台代碼", "機台名稱", "需求", "維修時數", "停機"]
+                        if c in nf.columns]
+                st.dataframe(nf[cols].rename(columns={"非故障": "類別"}),
+                             use_container_width=True, hide_index=True)
+
     # ── 未列入計算的報修單 ──
     ex = excluded[excluded["月份"] == month] if len(excluded) else excluded
     if len(ex):
@@ -1059,7 +1088,7 @@ def main():
                 st.success(f"✓ 解析完成：{len(df_all_new)} 筆記錄，發現系列：{', '.join(sorted(series_found)[:10])}{'…' if len(series_found)>10 else ''}")
                 df_kpi_new = calc_kpi(df_all_new, hours_base_new, special_off)
                 raw_cols = ["月份","機台代碼","機台名稱","系列","設備類型","維修時數","停機","缺料","完工超時"]
-                for col in ["需求","部門","設備名稱","seq","停工時數(h)"]:
+                for col in ["需求","部門","設備名稱","seq","停工時數(h)","非故障"]:
                     if col in df_all_new.columns:
                         raw_cols.append(col)
                 payload = {
@@ -1130,6 +1159,11 @@ def main():
         df_raw = df_raw[df_raw["機台代碼"].notna()].copy()
     else:
         excluded = df_raw.iloc[0:0]
+    if "非故障" not in df_raw.columns:          # 舊資料：只能依需求關鍵字判斷
+        df_raw["非故障"] = df_raw.apply(nonfault_reason, axis=1)
+    df_raw["非故障"] = df_raw["非故障"].fillna("")
+    nonfault = df_raw[df_raw["非故障"] != ""].copy()
+    df_raw = df_raw[df_raw["非故障"] == ""].copy()
     if "停工時數(h)" not in df_raw.columns:      # 舊資料：無單筆停工 → 停機單用維修時數
         df_raw["停工時數(h)"] = df_raw["維修時數"].where(df_raw["停機"].astype(bool), 0.0)
     df_kpi = build_full(df_kpi, roster, hours_base, special_off)
@@ -1586,7 +1620,7 @@ def main():
 
         # ══ Tab5：月度分析（系列合計＋機台個別）══════════════════════════
         with tab5:
-            render_monthly_analysis(df_kpi, df_raw, months_avail, excluded)
+            render_monthly_analysis(df_kpi, df_raw, months_avail, excluded, nonfault)
 
         st.markdown("---")
         st.caption("富強醫材股份有限公司 設備課　© 2026")
