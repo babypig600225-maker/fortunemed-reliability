@@ -69,6 +69,20 @@ svg text{font-family:inherit;}
 .hc th,.hc td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;}
 .hc th:first-child,.hc td:first-child{text-align:left;}
 .hc .tblwrap{overflow-x:auto;}
+
+/* Series-grouped health cards */
+.hc-series{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:4px;}
+.hc-series.low{border-color:var(--c-low);border-width:2px;}
+.hc-series.mid{border-color:var(--c-mid);border-width:2px;}
+.hcsg-hdr{display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;flex-wrap:wrap;}
+.hcsg-hdr:hover{background:var(--soft);}
+.hcsg-dot{width:12px;height:12px;border-radius:50%;flex:none;}
+.hcsg-name{font-weight:700;font-size:14px;white-space:nowrap;}
+.hcsg-label{font-size:13px;color:var(--muted);white-space:nowrap;}
+.hcsg-kpi{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;flex:1;min-width:0;}
+.hcsg-toggle{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap;}
+.hcsg-body{border-top:1px solid var(--line);padding:12px;}
+.health-inner{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;}
 </style>
 </head>
 <body>
@@ -98,22 +112,22 @@ svg text{font-family:inherit;}
   <section class="panel summary" id="summary"></section>
 
   <section class="panel">
-    <h2 id="trendTitle">可用率月趨勢</h2>
-    <div class="hint">實線為平均可用率（%），虛線為目標基準 85%。</div>
+    <h2 id="trendTitle">MTBF / MTTR 月趨勢</h2>
+    <div class="hint">藍線＝MTBF（h，左軸），橘線＝MTTR（h，右軸）；目標：MTBF≥100h、MTTR≤8h。</div>
     <div class="chartbox" id="trend"></div>
     <div class="tip" id="trendTip"></div>
   </section>
 
   <section class="panel">
-    <h2 id="barsTitle">各機台可用率</h2>
-    <div class="hint">依可用率由低到高排列；橫條長度＝可用率（%），紅＜80%、橘 80–94%、綠≥95%。</div>
+    <h2 id="barsTitle">各機台 MTBF</h2>
+    <div class="hint">依 MTBF 由低到高排列；紅＜50h、橘 50–99h、藍≥100h（達標）。</div>
     <div class="chartbox" id="bars"></div>
   </section>
 
   <section class="panel">
-    <h2>機台健康狀態</h2>
-    <div class="hint">依可用率由低到高排序；紅框＜80%、橘框 80–94%、無框≥95%。點卡片展開每月明細。</div>
-    <div class="health" id="health"></div>
+    <h2>機台健康狀態（MTBF 排序）</h2>
+    <div class="hint">依 MTBF 由低到高排序（MTBF 越短＝故障越頻繁）；紅框＜50h、橘框 50–99h、無框≥100h（達標）。點卡片展開每月明細。</div>
+    <div id="health" style="display:flex;flex-direction:column;gap:6px;"></div>
   </section>
 
   <div class="foot" id="foot"></div>
@@ -212,8 +226,8 @@ function renderScope(){
   const monthLabel = curMonth || '全年';
   document.getElementById('scopeNote').textContent =
     '目前顯示 — '+typeLabel+'　'+monthLabel;
-  document.getElementById('trendTitle').textContent = typeLabel+'　可用率月趨勢';
-  document.getElementById('barsTitle').textContent = (curMonth||'全年')+'　各機台可用率';
+  document.getElementById('trendTitle').textContent = typeLabel+'　MTBF / MTTR 月趨勢';
+  document.getElementById('barsTitle').textContent = (curMonth||'全年')+'　各機台 MTBF';
   document.getElementById('foot').textContent = '資料範圍：2026年 '+range+'　｜　設備可靠性分析儀表板';
 }
 
@@ -231,12 +245,14 @@ function renderKpis(){
   }
 
   const cards = [
+    { k:'平均 MTBF', v: kd.mtbf!=null ? kd.mtbf+' h' : '—',
+      d: delta('mtbf','h',false)
+         +(kd.mtbf!=null ? ' <span class="'+(kd.mtbf>=100?'up':'down')+'">目標≥100h</span>' : '') },
+    { k:'平均 MTTR', v: kd.mttr!=null ? kd.mttr+' h' : '—',
+      d: delta('mttr','h',true)
+         +(kd.mttr!=null ? ' <span class="'+(kd.mttr<=8?'up':'down')+'">目標≤8h</span>' : '') },
     { k:'平均可用率', v: kd.avail!=null ? kd.avail+'%' : '—',
       d: delta('avail','%',true) + (kd.low_avail ? ' <span class="down">'+kd.low_avail+' 台未達標</span>' : '') },
-    { k:'平均 MTBF', v: kd.mtbf!=null ? kd.mtbf+' h' : '—',
-      d: delta('mtbf','h',false)+' <span class="flat">(目標≥100h)</span>' },
-    { k:'平均 MTTR', v: kd.mttr!=null ? kd.mttr+' h' : '—',
-      d: delta('mttr','h',true)+' <span class="flat">(目標≤8h)</span>' },
     { k:'總停工時數', v: kd.downtime!=null ? kd.downtime+' h' : '—',
       d: kd.machines ? kd.machines+' 台機台' : '' },
     { k:'故障次數', v: kd.faults!=null ? kd.faults+' 次' : '—',
@@ -257,20 +273,26 @@ function renderSummary(){
   const typeLabel = curType==='全部' ? '全部機型' : curType;
 
   let txt = '';
-  if(kd.avail!=null){
-    txt += monthLabel+'「'+typeLabel+'」平均可用率為 <b>'+kd.avail+'%</b>';
-    if(prev.avail!=null){
-      const d = +(kd.avail-prev.avail).toFixed(1);
+  if(kd.mtbf!=null){
+    const mtbfOk = kd.mtbf>=100;
+    txt += monthLabel+'「'+typeLabel+'」平均 MTBF <b>'+kd.mtbf+' h</b>（目標≥100h，';
+    txt += mtbfOk ? '<b class="up">達標</b>）' : '<b class="down">未達標</b>）';
+    if(prev.mtbf!=null){
+      const d = +(kd.mtbf-prev.mtbf).toFixed(1);
       const prevMonth = DATA.months[DATA.months.indexOf(curMonth)-1] || '';
-      if(d>0) txt += '，較'+prevMonth+' <b class="up">上升 '+d+' 個百分點</b>';
-      else if(d<0) txt += '，較'+prevMonth+' <b class="down">下降 '+Math.abs(d)+' 個百分點</b>';
+      if(d>0) txt += '，較'+prevMonth+' <b class="up">延長 '+d+'h</b>';
+      else if(d<0) txt += '，較'+prevMonth+' <b class="down">縮短 '+Math.abs(d)+'h</b>';
       else txt += '，與前月持平';
     }
     txt += '。';
   }
-  if(kd.faults!=null) txt += '共發生故障 <b>'+kd.faults+' 次</b>，總停工時數 <b>'+kd.downtime+' h</b>。';
-  if(kd.machines!=null) txt += '涉及 <b>'+kd.machines+' 台</b>機台。';
-  if(kd.low_avail) txt += ' 其中 <b class="down">'+kd.low_avail+' 台</b>可用率未達目標 85%，請優先關注。';
+  if(kd.mttr!=null){
+    const mttrOk = kd.mttr<=8;
+    txt += '平均 MTTR <b>'+kd.mttr+' h</b>（目標≤8h，';
+    txt += mttrOk ? '<b class="up">達標</b>）。' : '<b class="down">超標</b>）。';
+  }
+  if(kd.faults!=null) txt += '共發生故障 <b>'+kd.faults+' 次</b>，總停工時數 <b>'+kd.downtime+' h</b>，涉及 <b>'+kd.machines+' 台</b>機台。';
+  if(kd.low_avail) txt += ' 其中 <b class="down">'+kd.low_avail+' 台</b>可用率低於 85%，請優先關注。';
 
   document.getElementById('summary').innerHTML =
     '<h2>'+monthLabel+'「'+typeLabel+'」可靠性摘要</h2>'
@@ -283,20 +305,19 @@ function renderRanks(){
   const machines = getMachines();
   const latestMonth = curMonth || (DATA.months && DATA.months[DATA.months.length-1]) || '';
 
-  // For selected month, get machines that have data
   let list = machines.map(function(m){
     if(!curMonth){
-      return {code:m.code, name:m.name, avail:m.avail, downtime:m.downtime, faults:m.faults};
+      return {code:m.code, name:m.name, mtbf:m.mtbf, mttr:m.mttr, downtime:m.downtime, faults:m.faults};
     }
     const mo = m.monthly.find(function(x){return x.m===curMonth;});
     if(!mo) return null;
-    return {code:m.code, name:m.name, avail:mo.avail, downtime:mo.downtime, faults:mo.faults};
+    return {code:m.code, name:m.name, mtbf:mo.mtbf, mttr:mo.mttr, downtime:mo.downtime, faults:mo.faults};
   }).filter(Boolean);
 
-  list.sort(function(a,b){return a.avail-b.avail;});
-  const low3 = list.slice(0,3);
-  list.sort(function(a,b){return b.downtime-a.downtime;});
-  const top3dt = list.slice(0,3);
+  list.sort(function(a,b){return a.mtbf-b.mtbf;});
+  const low3mtbf = list.slice(0,3);
+  list.sort(function(a,b){return b.mttr-a.mttr;});
+  const top3mttr = list.slice(0,3);
 
   function rankHTML(title, arr, valKey, unit, cls){
     if(!arr.length) return '<div class="rank"><h3>'+title+'</h3><div class="empty">無資料</div></div>';
@@ -309,8 +330,8 @@ function renderRanks(){
   }
 
   document.getElementById('ranks').innerHTML =
-    rankHTML('可用率最低 Top 3（需關注）', low3, 'avail', '%', 'down')
-    + rankHTML('停工時數最多 Top 3', top3dt, 'downtime', ' h', '');
+    rankHTML('MTBF 最短 Top 3（最常故障）', low3mtbf, 'mtbf', ' h', 'down')
+    + rankHTML('MTTR 最長 Top 3（修復最慢）', top3mttr, 'mttr', ' h', 'down');
 }
 
 function getTrend(){
@@ -330,54 +351,82 @@ function renderTrend(){
   const el = document.getElementById('trend');
   if(!trend.length){ el.innerHTML='<div class="empty" style="padding:20px 0">無趨勢資料</div>'; return; }
 
-  const W=el.offsetWidth||800, H=200;
-  const pad={t:30,b:40,l:52,r:20};
+  const W=el.offsetWidth||800, H=220;
+  const pad={t:36,b:40,l:58,r:58};
   const cw=W-pad.l-pad.r, ch=H-pad.t-pad.b;
 
-  const vals = trend.map(function(d){return d.avail;});
-  const yMin=0, yMax=110;
+  const mtbfVals = trend.map(function(d){return d.mtbf;});
+  const mttrVals = trend.map(function(d){return d.mttr;});
+  const mtbfMax  = Math.max(150, Math.ceil(Math.max.apply(null,mtbfVals)/50)*50);
+  const mttrMax  = Math.max(16,  Math.ceil(Math.max.apply(null,mttrVals)/4)*4);
 
   function xp(i){ return pad.l + i/(trend.length-1||1)*cw; }
-  function yp(v){ return pad.t + (1-(v-yMin)/(yMax-yMin))*ch; }
+  function ypL(v){ return pad.t + (1-v/mtbfMax)*ch; }   // MTBF left
+  function ypR(v){ return pad.t + (1-v/mttrMax)*ch; }   // MTTR right
 
   const isDark = document.body.classList.contains('dark');
-  const lineC = isDark ? '#5b9bf0' : '#2563c9';
-  const refC  = isDark ? '#555' : '#ccc';
-  const gridC = isDark ? '#2a323c' : '#eee';
-  const fgC   = isDark ? '#93a0ae' : '#6b7684';
+  const blueC  = isDark ? '#5b9bf0' : '#2563c9';
+  const orngC  = '#f0a020';
+  const gridC  = isDark ? '#2a323c' : '#eee';
+  const fgC    = isDark ? '#93a0ae' : '#6b7684';
+  const bgHit  = isDark ? '#1a2028' : '#fff';
 
   let paths = '';
-  // Grid lines
-  [0,25,50,75,85,100].forEach(function(v){
-    const y = yp(v);
-    const dash = v===85 ? '4,3' : '';
-    const col  = v===85 ? '#f0a020' : gridC;
+  // Left axis grid + labels (MTBF)
+  const mtbfTicks = [0, 50, 100, mtbfMax];
+  mtbfTicks.forEach(function(v){
+    const y = ypL(v);
+    const isTarget = v===100;
     paths += '<line x1="'+pad.l+'" y1="'+y+'" x2="'+(pad.l+cw)+'" y2="'+y+'"'
-      +' stroke="'+col+'" stroke-width="'+(v===85?1.5:1)+'" stroke-dasharray="'+dash+'"/>';
-    paths += '<text x="'+(pad.l-6)+'" y="'+(y+4)+'" text-anchor="end" font-size="11" fill="'+fgC+'">'+v+'%</text>';
-    if(v===85) paths += '<text x="'+(pad.l+cw+4)+'" y="'+(y+4)+'" font-size="10" fill="#f0a020">目標</text>';
+      +' stroke="'+(isTarget?orngC:gridC)+'" stroke-width="'+(isTarget?1.5:1)+'"'
+      +' stroke-dasharray="'+(isTarget?'5,3':'')+'" />';
+    paths += '<text x="'+(pad.l-6)+'" y="'+(y+4)+'" text-anchor="end" font-size="11" fill="'+(isTarget?blueC:fgC)+'">'+v+'h</text>';
+    if(isTarget) paths += '<text x="'+(pad.l+cw+4)+'" y="'+(y+4)+'" font-size="10" fill="'+blueC+'">目標</text>';
+  });
+  // Right axis labels (MTTR)
+  const mttrTicks = [0, 4, 8, mttrMax];
+  mttrTicks.forEach(function(v){
+    const y = ypR(v);
+    const isTarget = v===8;
+    paths += '<text x="'+(pad.l+cw+6)+'" y="'+(y+4)+'" font-size="11" fill="'+(isTarget?orngC:fgC)+'">'+v+'h</text>';
+    if(isTarget) paths += '<text x="'+(pad.l+cw+28)+'" y="'+(y+4)+'" font-size="10" fill="'+orngC+'">↑限</text>';
   });
 
-  // Line path
-  let d=''; trend.forEach(function(pt,i){ d+=(i===0?'M':'L')+xp(i)+','+yp(pt.avail); });
-  paths += '<path d="'+d+'" fill="none" stroke="'+lineC+'" stroke-width="2.5" stroke-linejoin="round"/>';
+  // MTBF line (blue, left axis)
+  let d1=''; trend.forEach(function(pt,i){ d1+=(i===0?'M':'L')+xp(i)+','+ypL(pt.mtbf); });
+  paths += '<path d="'+d1+'" fill="none" stroke="'+blueC+'" stroke-width="2.5" stroke-linejoin="round"/>';
 
-  // Points + labels
+  // MTTR line (orange dashed, right axis)
+  let d2=''; trend.forEach(function(pt,i){ d2+=(i===0?'M':'L')+xp(i)+','+ypR(pt.mttr); });
+  paths += '<path d="'+d2+'" fill="none" stroke="'+orngC+'" stroke-width="2" stroke-dasharray="6,3" stroke-linejoin="round"/>';
+
+  // Points + value labels
   trend.forEach(function(pt,i){
-    const x=xp(i), y=yp(pt.avail);
-    const col = pt.avail>=95?lineC : pt.avail>=80?'#f0a020':'#d64541';
+    const x=xp(i), y1=ypL(pt.mtbf), y2=ypR(pt.mttr);
     const isCur = pt.m===curMonth;
-    paths += '<circle cx="'+x+'" cy="'+y+'" r="'+(isCur?6:4)+'" fill="'+col+'"'
-      +' stroke="'+(isDark?'#1a2028':'#fff')+'" stroke-width="2"/>';
-    paths += '<text x="'+x+'" y="'+(y-11)+'" text-anchor="middle" font-size="11" font-weight="'+(isCur?700:400)+'" fill="'+col+'">'+pt.avail+'%</text>';
+    const colMtbf = pt.mtbf>=100?blueC:'#d64541';
+    // MTBF dot
+    paths += '<circle cx="'+x+'" cy="'+y1+'" r="'+(isCur?6:4)+'" fill="'+colMtbf+'" stroke="'+bgHit+'" stroke-width="2"/>';
+    paths += '<text x="'+x+'" y="'+(y1-10)+'" text-anchor="middle" font-size="11" font-weight="'+(isCur?700:400)+'" fill="'+colMtbf+'">'+pt.mtbf+'</text>';
+    // MTTR dot
+    const colMttr = pt.mttr<=8?orngC:'#d64541';
+    paths += '<circle cx="'+x+'" cy="'+y2+'" r="3" fill="'+colMttr+'" stroke="'+bgHit+'" stroke-width="1.5"/>';
   });
 
   // X labels
   trend.forEach(function(pt,i){
-    const x=xp(i);
-    const isCur = pt.m===curMonth;
-    paths += '<text x="'+x+'" y="'+(H-6)+'" text-anchor="middle" font-size="12" font-weight="'+(isCur?700:400)+'" fill="'+(isCur?lineC:fgC)+'">'+pt.m+'</text>';
+    const x=xp(i), isCur=pt.m===curMonth;
+    paths += '<text x="'+x+'" y="'+(H-6)+'" text-anchor="middle" font-size="12"'
+      +' font-weight="'+(isCur?700:400)+'" fill="'+(isCur?blueC:fgC)+'">'+pt.m+'</text>';
   });
+
+  // Legend
+  paths += '<rect x="'+(pad.l+4)+'" y="'+(pad.t-26)+'" width="90" height="18" rx="4" fill="'+bgHit+'" opacity="0.9"/>';
+  paths += '<line x1="'+(pad.l+10)+'" y1="'+(pad.t-17)+'" x2="'+(pad.l+26)+'" y2="'+(pad.t-17)+'" stroke="'+blueC+'" stroke-width="2.5"/>';
+  paths += '<text x="'+(pad.l+30)+'" y="'+(pad.t-13)+'" font-size="11" fill="'+fgC+'">MTBF（h）</text>';
+  paths += '<rect x="'+(pad.l+100)+'" y="'+(pad.t-26)+'" width="90" height="18" rx="4" fill="'+bgHit+'" opacity="0.9"/>';
+  paths += '<line x1="'+(pad.l+106)+'" y1="'+(pad.t-17)+'" x2="'+(pad.l+122)+'" y2="'+(pad.t-17)+'" stroke="'+orngC+'" stroke-width="2" stroke-dasharray="5,2"/>';
+  paths += '<text x="'+(pad.l+126)+'" y="'+(pad.t-13)+'" font-size="11" fill="'+fgC+'">MTTR（h）</text>';
 
   el.innerHTML = '<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+paths+'</svg>';
 }
@@ -391,13 +440,13 @@ function renderBars(){
     if(curMonth){
       const mo = m.monthly.find(function(x){return x.m===curMonth;});
       if(!mo) return null;
-      return {code:m.code, name:m.name, avail:mo.avail, faults:mo.faults, downtime:mo.downtime};
+      return {code:m.code, name:m.name, mtbf:mo.mtbf, mttr:mo.mttr, faults:mo.faults, downtime:mo.downtime};
     }
-    return {code:m.code, name:m.name, avail:m.avail, faults:m.faults, downtime:m.downtime};
+    return {code:m.code, name:m.name, mtbf:m.mtbf, mttr:m.mttr, faults:m.faults, downtime:m.downtime};
   }).filter(Boolean);
 
   if(!list.length){ el.innerHTML='<div class="empty" style="padding:20px 0">無資料</div>'; return; }
-  list.sort(function(a,b){return a.avail-b.avail;});
+  list.sort(function(a,b){return a.mtbf-b.mtbf;});
 
   const ROW=28, PAD_L=180, PAD_R=60, PAD_V=12;
   const W=el.offsetWidth||800;
@@ -409,22 +458,26 @@ function renderBars(){
   const fg2=isDark?'#e5e9ee':'#1d2530';
   const gridC=isDark?'#2a323c':'#eee';
 
+  const mtbfValsBar = list.map(function(d){return d.mtbf;});
+  const barScale = Math.max(150, Math.ceil(Math.max.apply(null,mtbfValsBar)/50)*50);
+
   let svg='';
-  // Grid lines
-  [0,25,50,75,85,100].forEach(function(v){
-    const x=PAD_L+v/100*barW;
+  // Grid lines at MTBF ticks
+  [0,50,100,barScale].forEach(function(v){
+    const x=PAD_L+v/barScale*barW;
+    const isTarget=v===100;
     svg+='<line x1="'+x+'" y1="'+PAD_V+'" x2="'+x+'" y2="'+(H-PAD_V)+'"'
-      +' stroke="'+(v===85?'#f0a020':gridC)+'" stroke-width="'+(v===85?1.5:1)+'"'
-      +' stroke-dasharray="'+(v===85?'4,3':'')+'" />';
-    if(v!==0 && v!==100)
-      svg+='<text x="'+x+'" y="'+(PAD_V-4)+'" text-anchor="middle" font-size="10" fill="'+fgC+'">'+v+'%</text>';
+      +' stroke="'+(isTarget?'#2563c9':gridC)+'" stroke-width="'+(isTarget?1.5:1)+'"'
+      +' stroke-dasharray="'+(isTarget?'4,3':'')+'" />';
+    if(v!==0)
+      svg+='<text x="'+x+'" y="'+(PAD_V-4)+'" text-anchor="middle" font-size="10" fill="'+(isTarget?'#2563c9':fgC)+'">'+v+'h'+(isTarget?' ★':'')+'</text>';
   });
 
   list.forEach(function(item,i){
     const y=PAD_V+i*ROW;
     const bh=ROW*0.55, by=y+(ROW-bh)/2;
-    const bw=Math.max(item.avail/100*barW,2);
-    const col=item.avail>=95?'#2563c9':item.avail>=80?'#f0a020':'#d64541';
+    const bw=Math.max(item.mtbf/barScale*barW,2);
+    const col=item.mtbf>=100?'#2563c9':item.mtbf>=50?'#f0a020':'#d64541';
 
     // Label (machine code + name)
     const label=(item.code||'').replace('M-','').replace(/-\d+$/,'');
@@ -434,10 +487,7 @@ function renderBars(){
     // Bar
     svg+='<rect x="'+PAD_L+'" y="'+by+'" width="'+bw+'" height="'+bh+'" rx="3" fill="'+col+'" opacity="0.85"/>';
     // Value label
-    if(bw>24)
-      svg+='<text x="'+(PAD_L+bw+4)+'" y="'+(by+bh/2+4)+'" font-size="11" font-weight="600" fill="'+col+'">'+item.avail+'%</text>';
-    else
-      svg+='<text x="'+(PAD_L+bw+4)+'" y="'+(by+bh/2+4)+'" font-size="11" font-weight="600" fill="'+col+'">'+item.avail+'%</text>';
+    svg+='<text x="'+(PAD_L+bw+4)+'" y="'+(by+bh/2+4)+'" font-size="11" font-weight="600" fill="'+col+'">'+item.mtbf+'h</text>';
   });
 
   el.innerHTML='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="display:block">'+svg+'</svg>';
@@ -457,48 +507,115 @@ function renderHealth(){
     return Object.assign({},m,{_avail:m.avail,_mtbf:m.mtbf,_mttr:m.mttr,_faults:m.faults,_downtime:m.downtime});
   });
 
-  // Sort: low avail first, then null
-  list.sort(function(a,b){
-    if(a._avail===null && b._avail===null) return 0;
-    if(a._avail===null) return 1;
-    if(b._avail===null) return -1;
-    return a._avail-b._avail;
+  // Group by series
+  const seriesMap = {};
+  list.forEach(function(m){
+    const s = m.series || m.code;
+    if(!seriesMap[s]) seriesMap[s] = {series:s, name:m.name, type:m.type, machines:[]};
+    seriesMap[s].machines.push(m);
   });
 
-  el.innerHTML = list.map(function(m,idx){
-    const av = m._avail;
-    const col = av===null ? '#9aa8b8' : av>=95 ? '#2563c9' : av>=80 ? '#f0a020' : '#d64541';
-    const cls = av===null ? '' : av<80 ? ' low' : av<95 ? ' mid' : '';
-    const bigVal = av!==null ? av+'%' : '—';
+  // Sort each series' machines by MTBF asc
+  Object.values(seriesMap).forEach(function(sg){
+    sg.machines.sort(function(a,b){
+      if(a._mtbf===null) return 1;
+      if(b._mtbf===null) return -1;
+      return a._mtbf - b._mtbf;
+    });
+    // Series-level aggregate: avg MTBF, avg MTTR, avg avail, sum faults
+    var mbfs = sg.machines.map(function(m){return m._mtbf;}).filter(function(v){return v!==null;});
+    var mttrs = sg.machines.map(function(m){return m._mttr;}).filter(function(v){return v!==null;});
+    var avails= sg.machines.map(function(m){return m._avail;}).filter(function(v){return v!==null;});
+    sg.avgMtbf  = mbfs.length  ? Math.round(mbfs.reduce(function(a,b){return a+b;},0)/mbfs.length*10)/10 : null;
+    sg.avgMttr  = mttrs.length ? Math.round(mttrs.reduce(function(a,b){return a+b;},0)/mttrs.length*10)/10 : null;
+    sg.avgAvail = avails.length? Math.round(avails.reduce(function(a,b){return a+b;},0)/avails.length*10)/10 : null;
+    sg.sumFaults= sg.machines.reduce(function(a,m){return a+(m._faults||0);},0);
+    sg.minMtbf  = mbfs.length  ? Math.min.apply(null,mbfs) : null;
+  });
 
-    const monthRows = m.monthly.map(function(mo){
-      const c2=mo.avail>=95?'#2563c9':mo.avail>=80?'#f0a020':'#d64541';
-      return '<tr><td>'+mo.m+'</td><td style="color:'+c2+';font-weight:600">'+mo.avail+'%</td>'
-        +'<td>'+mo.mtbf+'h</td><td>'+mo.mttr+'h</td><td>'+mo.faults+'</td><td>'+mo.downtime+'h</td></tr>';
-    }).join('');
+  // Sort series by avgMtbf asc (worst first)
+  const seriesArr = Object.values(seriesMap).sort(function(a,b){
+    if(a.avgMtbf===null) return 1;
+    if(b.avgMtbf===null) return -1;
+    return a.avgMtbf - b.avgMtbf;
+  });
 
-    return '<div class="hc'+cls+'" id="hc'+idx+'" onclick="toggleHc('+idx+')">'
-      +'<div class="top"><i style="background:'+col+'"></i>'+m.code+'</div>'
-      +'<div class="big" style="color:'+col+'">'+bigVal+'</div>'
-      +'<div class="meta">'+(m.name||'')+'</div>'
-      +'<div class="meta">MTBF '+(m._mtbf!=null?m._mtbf+'h':'—')
-      +'　MTTR '+(m._mttr!=null?m._mttr+'h':'—')
-      +'　故障 '+(m._faults!=null?m._faults+'次':'—')+'</div>'
-      +'<div class="detail" id="hcd'+idx+'" style="display:none">'
-      +'<div class="tblwrap"><table><tr><th>月份</th><th>可用率</th><th>MTBF</th><th>MTTR</th><th>故障</th><th>停工</th></tr>'
-      +monthRows+'</table></div></div>'
-      +'</div>';
-  }).join('');
+  let html = '';
+  seriesArr.forEach(function(sg, si){
+    const mb  = sg.avgMtbf;
+    const col = mb===null ? '#9aa8b8' : mb>=100 ? '#2563c9' : mb>=50 ? '#f0a020' : '#d64541';
+    const cls = mb===null ? '' : mb<50 ? ' low' : mb<100 ? ' mid' : '';
+
+    // Series header card (always full-width)
+    html += '<div class="hc-series'+(cls?cls:'')+'" id="hcsg'+si+'">'
+      +'<div class="hcsg-hdr" onclick="toggleSg('+si+')">'
+      +'<span class="hcsg-dot" style="background:'+col+'"></span>'
+      +'<span class="hcsg-name">'+sg.series+'</span>'
+      +'<span class="hcsg-label">'+sg.machines[0].name+'</span>'
+      +'<span class="hcsg-kpi">MTBF '+(mb!==null?mb+'h':'—')
+      +'　MTTR '+(sg.avgMttr!==null?sg.avgMttr+'h':'—')
+      +'　可用率 '+(sg.avgAvail!==null?sg.avgAvail+'%':'—')
+      +'　故障 '+sg.sumFaults+'次'
+      +'</span>'
+      +'<span class="hcsg-toggle" id="hcsgarrow'+si+'">▶</span>'
+      +'</div>'
+      // Machine cards row (hidden by default)
+      +'<div class="hcsg-body" id="hcsgb'+si+'" style="display:none">'
+      +'<div class="health-inner">';
+
+    sg.machines.forEach(function(m, mi){
+      const mb2 = m._mtbf;
+      const col2= mb2===null?'#9aa8b8':mb2>=100?'#2563c9':mb2>=50?'#f0a020':'#d64541';
+      const cls2= mb2===null?'':mb2<50?' low':mb2<100?' mid':'';
+      const id  = 'hcm'+si+'_'+mi;
+
+      const monthRows = m.monthly.map(function(mo){
+        const c3=mo.mtbf>=100?'#2563c9':mo.mtbf>=50?'#f0a020':'#d64541';
+        return '<tr><td>'+mo.m+'</td>'
+          +'<td style="color:'+c3+';font-weight:600">'+mo.mtbf+'h</td>'
+          +'<td>'+mo.mttr+'h</td>'
+          +'<td>'+mo.avail+'%</td>'
+          +'<td>'+mo.faults+'</td>'
+          +'<td>'+mo.downtime+'h</td></tr>';
+      }).join('');
+
+      html += '<div class="hc'+cls2+'" id="'+id+'" onclick="toggleMc(\''+id+'\')">'
+        +'<div class="top"><i style="background:'+col2+'"></i>'
+        +m.code.replace(sg.series+'-','')+'</div>'
+        +'<div class="big" style="color:'+col2+'">'+(mb2!==null?mb2+'h':'—')+'</div>'
+        +'<div class="meta">MTTR '+(m._mttr!=null?m._mttr+'h':'—')
+        +'　可用率 '+(m._avail!=null?m._avail+'%':'—')+'</div>'
+        +'<div class="meta">故障 '+(m._faults!=null?m._faults+'次':'—')+'</div>'
+        +'<div class="detail" id="'+id+'d" style="display:none">'
+        +'<div class="tblwrap"><table>'
+        +'<tr><th>月份</th><th>MTBF</th><th>MTTR</th><th>可用率</th><th>故障</th><th>停工</th></tr>'
+        +monthRows+'</table></div></div>'
+        +'</div>';
+    });
+
+    html += '</div></div></div>';
+  });
+
+  el.innerHTML = html;
 }
 
-function toggleHc(idx){
-  const card = document.getElementById('hc'+idx);
-  const detail = document.getElementById('hcd'+idx);
+function toggleSg(si){
+  const body  = document.getElementById('hcsgb'+si);
+  const arrow = document.getElementById('hcsgarrow'+si);
+  if(!body) return;
+  const open = body.style.display!=='none';
+  body.style.display  = open ? 'none' : 'block';
+  if(arrow) arrow.textContent = open ? '▶' : '▼';
+}
+
+function toggleMc(id){
+  const card  = document.getElementById(id);
+  const detail= document.getElementById(id+'d');
   if(!detail) return;
   const open = detail.style.display!=='none';
   detail.style.display = open ? 'none' : 'block';
-  if(!open){ card.classList.add('open'); }
-  else { card.classList.remove('open'); }
+  if(!open) card.classList.add('open');
+  else card.classList.remove('open');
 }
 
 // Redraw on resize
