@@ -823,13 +823,9 @@ def main():
 
     # ── 資訊列 ──
     m_range = f"{months_avail[0].replace('2026-','')} – {months_avail[-1].replace('2026-','')}" if months_avail else ""
-    info_col, btn_col = st.columns([6, 1])
+    info_col = st.container()
     with info_col:
         st.caption(f"📅 2026年 {m_range}　｜　資料更新：{stored.get('updated','—')}")
-    with btn_col:
-        if st.button("↩ 重新上傳"):
-            st.cache_data.clear()
-            st.rerun()
     st.divider()
 
     # ── 全局篩選器 ────────────────────────────────────────────────────
