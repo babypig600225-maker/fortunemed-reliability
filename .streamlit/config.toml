@@ -1,0 +1,10 @@
+[theme]
+base = "light"
+primaryColor = "#2563c9"
+backgroundColor = "#f7f7f5"
+secondaryBackgroundColor = "#f1f3f6"
+textColor = "#1d2530"
+borderColor = "#e4e6ea"
+baseFontSize = 14
+baseRadius = "8px"
+font = "'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', sans-serif"

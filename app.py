@@ -142,16 +142,19 @@ SERIES_NAME = {
     "M-306-027": "4k顯微影像觀察系統",
 }
 
-CHART_COLORS = ['#378ADD','#1D9E75','#BA7517','#D85A30','#7F77DD','#D4537E',
+CHART_COLORS = ['#2563c9','#2e9d57','#f0a020','#d64541','#7F77DD','#D4537E',
                 '#2CA6A4','#E5A234','#5C85D6','#B84DB8']
 
 PLOT_LAYOUT = dict(
     plot_bgcolor='#ffffff', paper_bgcolor='#ffffff',
     font=dict(family='"Noto Sans TC","Microsoft JhengHei","PingFang TC",system-ui,sans-serif',
-              size=13, color="#1d2530"),
+              size=12, color="#6b7684"),
+    title_font=dict(size=14, color="#1d2530"),
+    hoverlabel=dict(bgcolor="#ffffff", bordercolor="#e4e6ea",
+                    font=dict(size=12, color="#1d2530")),
     margin=dict(t=48, b=40, l=48, r=16),
 )
-GRID = dict(gridcolor='#eae8e1', linecolor='#eae8e1')
+GRID = dict(gridcolor='#e4e6ea', linecolor='#e4e6ea')
 
 st.set_page_config(
     page_title="富強醫材｜設備可靠性分析",
@@ -183,7 +186,16 @@ html, body, .main, [data-testid="stAppViewContainer"] {
     color: var(--fg) !important;
 }
 .main { padding: 0 1.5rem; }
-.block-container { padding-top: 1rem !important; max-width:1400px; }
+/* 與視覺化總覽相同寬度：內容 1180px，左右 18px */
+.block-container {
+    padding-top: 1rem !important; padding-left: 18px !important; padding-right: 18px !important;
+    max-width: 1216px !important;
+}
+/* 基準字級 14px（與 HTML body 一致） */
+[data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li,
+[data-testid="stText"], [data-testid="stWidgetLabel"] p {
+    font-size: 14px !important; line-height: 1.55 !important;
+}
 
 /* 頂部標題 banner（簡潔白底風格） */
 .page-banner {
@@ -211,20 +223,22 @@ html, body, .main, [data-testid="stAppViewContainer"] {
 }
 
 /* KPI 卡片（白底 + 細邊框，與稼動率一致） */
-div[data-testid="metric-container"] {
+div[data-testid="metric-container"], div[data-testid="stMetric"] {
     background: var(--card) !important;
     border-radius: 12px !important;
     padding: 14px 18px !important;
     border: 1px solid var(--line) !important;
 }
-div[data-testid="metric-container"] label {
+div[data-testid="metric-container"] label, div[data-testid="stMetric"] label,
+[data-testid="stMetricLabel"] p {
     font-size: 13px !important;
     color: var(--muted) !important;
     font-weight: 400 !important;
     text-transform: none !important;
     letter-spacing: 0 !important;
 }
-div[data-testid="metric-container"] [data-testid="stMetricValue"] {
+[data-testid="stMetricValue"], [data-testid="stMetricValue"] *,
+[data-testid="stMetricValue"] [data-testid="stMarkdownContainer"] p {
     font-size: 1.85rem !important;
     font-weight: 600 !important;
     color: var(--fg) !important;
@@ -254,13 +268,17 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 
 /* 設備類型標題 */
 .type-header {
-    font-size: 18px;
+    font-size: 15.5px;
     font-weight: 700;
-    padding: 10px 16px;
-    border-radius: 8px;
-    margin: 20px 0 8px 0;
-    color: white;
+    padding: 12px 16px;
+    border-radius: 12px;
+    margin: 18px 0 10px 0;
+    color: var(--fg);
+    background: var(--card) !important;
+    border: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
 }
+.type-header i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; }
 
 /* 設備流水碼小標題 */
 .series-label {
@@ -272,12 +290,10 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
 
 /* 區塊標題 */
 .section-title {
-    font-size: 15px;
+    font-size: 15.5px;
     font-weight: 600;
-    color: var(--accent);
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 4px;
-    margin: 12px 0 8px 0;
+    color: var(--fg);
+    margin: 14px 0 8px 0;
 }
 
 /* 徽章 */
@@ -863,8 +879,8 @@ def main():
         st.markdown("""
         <div style="text-align:center;padding:80px 0;">
         <div style="font-size:48px;margin-bottom:12px">📊</div>
-        <div style="font-size:18px;font-weight:600;color:#1a1a18;margin-bottom:8px">尚無資料</div>
-        <div style="font-size:13px;color:#888780">請展開上方「🔑 管理員更新資料」區域上傳報修 Excel 檔案</div>
+        <div style="font-size:18px;font-weight:600;color:#1d2530;margin-bottom:8px">尚無資料</div>
+        <div style="font-size:13px;color:#6b7684">請展開上方「🔑 管理員更新資料」區域上傳報修 Excel 檔案</div>
         </div>""", unsafe_allow_html=True)
         return
 
@@ -950,7 +966,7 @@ def main():
 
         # ══ Tab1：月別總覽（大類 → 系列代碼一覽表）════════════════════════════
         with tab1:
-            TYPE_COLOR = {"成型類": "#378ADD", "加工類": "#1D9E75", "包裝類": "#BA7517"}
+            TYPE_COLOR = {"成型類": "#2563c9", "加工類": "#2e9d57", "包裝類": "#f0a020"}
 
             def style_avail_cell(val):
                 if not isinstance(val, (int, float)): return ""
@@ -960,12 +976,12 @@ def main():
 
             def style_failures(val):
                 if not isinstance(val, (int, float)): return ""
-                if val == 0: return "color:#888"
+                if val == 0: return "color:#6b7684"
                 if val >= 5: return "color:#a32d2d;font-weight:600"
                 return ""
 
             for eq_type in EQ_TYPE_ORDER:
-                type_color = TYPE_COLOR.get(eq_type, "#378ADD")
+                type_color = TYPE_COLOR.get(eq_type, "#2563c9")
                 # 該類所有資料
                 dk_type = dk[dk["設備類型"] == eq_type]
                 if dk_type.empty:
@@ -973,8 +989,8 @@ def main():
 
                 # ── 大類標題 ──
                 st.markdown(
-                    f'<div class="type-header" style="background:{type_color}">'
-                    f'▌ {eq_type}</div>',
+                    f'<div class="type-header"><i style="background:{type_color}"></i>'
+                    f'{eq_type}</div>',
                     unsafe_allow_html=True)
 
                 # ── 大類 KPI 摘要卡 ──
@@ -1048,7 +1064,7 @@ def main():
                             y=df_chart["系列標籤"],
                             mode="markers",
                             name="停工時數(h)",
-                            marker=dict(color="#D85A30", size=10, symbol="diamond"),
+                            marker=dict(color="#d64541", size=10, symbol="diamond"),
                             xaxis="x2",
                         )
                         chart_h = max(200, len(df_chart) * 36 + 60)
@@ -1126,10 +1142,10 @@ def main():
                 fig2 = go.Figure(go.Bar(
                     x=top10["停工時數(h)"], y=top10["機台代碼"],
                     orientation="h", text=top10["停工時數(h)"],
-                    marker_color="#D85A30", opacity=0.85,
+                    marker_color="#d64541", opacity=0.85, textangle=0, textposition="auto",
                     hovertext=top10["機台名稱"]))
                 fig2.update_layout(**PLOT_LAYOUT, height=340,
-                    yaxis=dict(autorange="reversed", gridcolor='#eae8e1'),
+                    yaxis=dict(autorange="reversed", gridcolor='#e4e6ea'),
                     title=dict(text="停工時數 TOP 10", font_size=13, x=0))
                 st.plotly_chart(fig2, use_container_width=True)
 
@@ -1142,11 +1158,11 @@ def main():
                 fig3 = go.Figure(go.Bar(
                     x=top10f["故障次數"], y=top10f["機台代碼"],
                     orientation="h", text=top10f["故障次數"],
-                    marker_color="#378ADD", opacity=0.85,
+                    marker_color="#2563c9", opacity=0.85, textangle=0, textposition="auto",
                     customdata=top10f["機台名稱"],
                     hovertemplate="%{y}<br>%{customdata}<br>故障 %{x} 次<br><i>點擊查看故障原因</i><extra></extra>"))
                 fig3.update_layout(**PLOT_LAYOUT, height=340,
-                    yaxis=dict(autorange="reversed", gridcolor='#eae8e1'),
+                    yaxis=dict(autorange="reversed", gridcolor='#e4e6ea'),
                     title=dict(text="故障次數 TOP 10（點長條看故障原因）", font_size=13, x=0),
                     clickmode="event+select")
                 ev = st.plotly_chart(fig3, use_container_width=True,
@@ -1235,7 +1251,7 @@ def main():
             shortage_m = shortage_m.sort_values("月份", key=lambda x: x.map(
                 {m:i for i,m in enumerate(MONTH_ORDER)}))
             fig5 = go.Figure(go.Bar(x=shortage_m["月份"], y=shortage_m["缺料件數"],
-                                    text=shortage_m["缺料件數"], marker_color="#BA7517", opacity=0.85))
+                                    text=shortage_m["缺料件數"], marker_color="#f0a020", opacity=0.85))
             fig5.update_layout(**PLOT_LAYOUT, height=260,
                 title=dict(text="缺料件數", font_size=13, x=0))
             st.plotly_chart(fig5, use_container_width=True)
@@ -1253,15 +1269,15 @@ def main():
                 fig6 = go.Figure()
                 fig6.add_scatter(x=ds2["月份"], y=ds2["平均MTBF(h)"],
                                  name="平均MTBF(h)", mode="lines+markers",
-                                 line=dict(color="#378ADD", width=2), marker=dict(size=7))
+                                 line=dict(color="#2563c9", width=2), marker=dict(size=7))
                 fig6.add_scatter(x=ds2["月份"], y=ds2["平均MTTR(h)"],
                                  name="平均MTTR(h)", mode="lines+markers",
-                                 line=dict(color="#D85A30", width=2), marker=dict(size=7),
+                                 line=dict(color="#f0a020", width=2), marker=dict(size=7),
                                  yaxis="y2")
-                fig6.add_hline(y=THRESHOLD_MTBF, line_dash="dash", line_color="#378ADD",
+                fig6.add_hline(y=THRESHOLD_MTBF, line_dash="dash", line_color="#2563c9",
                                annotation_text=f"MTBF目標 {THRESHOLD_MTBF}h")
                 fig6.update_layout(**PLOT_LAYOUT,
-                    yaxis=dict(title="MTBF(h)", gridcolor='#eae8e1'),
+                    yaxis=dict(title="MTBF(h)", gridcolor='#e4e6ea'),
                     yaxis2=dict(title="MTTR(h)", overlaying="y", side="right"),
                     legend=dict(x=0, y=1.08, orientation="h"), height=320)
                 st.plotly_chart(fig6, use_container_width=True)
@@ -1272,12 +1288,12 @@ def main():
                 fig7 = go.Figure()
                 fig7.add_scatter(x=ds2["月份"], y=ds2["平均可用率(%)"],
                                  mode="lines+markers",
-                                 line=dict(color="#1D9E75", width=2), marker=dict(size=7),
+                                 line=dict(color="#2e9d57", width=2), marker=dict(size=7),
                                  fill="tozeroy", fillcolor="rgba(29,158,117,0.08)")
-                fig7.add_hline(y=THRESHOLD_AVAIL, line_dash="dash", line_color="#BA7517",
+                fig7.add_hline(y=THRESHOLD_AVAIL, line_dash="dash", line_color="#f0a020",
                                annotation_text=f"目標 {THRESHOLD_AVAIL}%")
                 fig7.update_layout(**PLOT_LAYOUT, height=320,
-                    yaxis=dict(title="可用率(%)", range=[0,110], gridcolor='#eae8e1'))
+                    yaxis=dict(title="可用率(%)", range=[0,110], gridcolor='#e4e6ea'))
                 st.plotly_chart(fig7, use_container_width=True)
 
             # 熱圖 — 分三大類
@@ -1292,18 +1308,17 @@ def main():
                 'color:#7b4f00;font-weight:600;">🟨 80–94%　偏低</span>'
                 '<span style="background:#e2efda;padding:3px 10px;border-radius:4px;'
                 'color:#1f7a4d;font-weight:600;">🟩 ≥95%　良好</span>'
-                '<span style="color:#888;padding:3px 0;">（格內數字為平均可用率 %）</span>'
+                '<span style="color:#6b7684;padding:3px 0;">（格內數字為平均可用率 %）</span>'
                 '</div>',
                 unsafe_allow_html=True)
-            TYPE_COLOR_HM = {"成型類": "#378ADD", "加工類": "#1D9E75", "包裝類": "#BA7517"}
+            TYPE_COLOR_HM = {"成型類": "#2563c9", "加工類": "#2e9d57", "包裝類": "#f0a020"}
             for eq_type in EQ_TYPE_ORDER:
                 dk_hm = dk[dk["設備類型"] == eq_type]
                 if dk_hm.empty:
                     continue
-                type_color = TYPE_COLOR_HM.get(eq_type, "#378ADD")
+                type_color = TYPE_COLOR_HM.get(eq_type, "#2563c9")
                 st.markdown(
-                    f'<div style="font-size:14px;font-weight:700;color:{type_color};'
-                    f'margin:16px 0 6px;padding-left:8px;border-left:4px solid {type_color}">'
+                    f'<div class="type-header"><i style="background:{type_color}"></i>'
                     f'{eq_type}</div>', unsafe_allow_html=True)
                 pivot = dk_hm.pivot_table(values="可用率(%)",
                                           index="系列", columns="月份", aggfunc="mean").round(2)
