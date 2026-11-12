@@ -126,7 +126,7 @@ svg text{font-family:inherit;}
 
   <section class="panel">
     <h2>機台健康狀態（MTBF 排序）</h2>
-    <div class="hint">依 MTBF 由低到高排序（MTBF 越短＝故障越頻繁）；紅框＜50h、橘框 50–99h、無框≥100h（達標）。點卡片展開每月明細。</div>
+    <div class="hint">依 MTBF 由低到高排序（MTBF 越短＝故障越頻繁）；紅框＜50h、橘框 50–99h、無框≥100h（達標）。系列 MTBF＝（在用台數×月時數 − 停工合計）÷ 故障合計（含無故障機台）；點系列展開各機台。</div>
     <div id="health" style="display:flex;flex-direction:column;gap:6px;"></div>
   </section>
 
@@ -245,13 +245,13 @@ function renderKpis(){
   }
 
   const cards = [
-    { k:'平均 MTBF', v: kd.mtbf!=null ? kd.mtbf+' h' : '—',
+    { k:'MTBF（合計）', v: kd.mtbf!=null ? kd.mtbf+' h' : '—',
       d: delta('mtbf','h',false)
          +(kd.mtbf!=null ? ' <span class="'+(kd.mtbf>=100?'up':'down')+'">目標≥100h</span>' : '') },
-    { k:'平均 MTTR', v: kd.mttr!=null ? kd.mttr+' h' : '—',
+    { k:'MTTR（合計）', v: kd.mttr!=null ? kd.mttr+' h' : '—',
       d: delta('mttr','h',true)
          +(kd.mttr!=null ? ' <span class="'+(kd.mttr<=8?'up':'down')+'">目標≤8h</span>' : '') },
-    { k:'平均可用率', v: kd.avail!=null ? kd.avail+'%' : '—',
+    { k:'可用率（合計）', v: kd.avail!=null ? kd.avail+'%' : '—',
       d: delta('avail','%',true) + (kd.low_avail ? ' <span class="down">'+kd.low_avail+' 台未達標</span>' : '') },
     { k:'總停工時數', v: kd.downtime!=null ? kd.downtime+' h' : '—',
       d: kd.machines ? kd.machines+' 台機台' : '' },
@@ -275,7 +275,7 @@ function renderSummary(){
   let txt = '';
   if(kd.mtbf!=null){
     const mtbfOk = kd.mtbf>=100;
-    txt += monthLabel+'「'+typeLabel+'」平均 MTBF <b>'+kd.mtbf+' h</b>（目標≥100h，';
+    txt += monthLabel+'「'+typeLabel+'」MTBF <b>'+kd.mtbf+' h</b>（目標≥100h，';
     txt += mtbfOk ? '<b class="up">達標</b>）' : '<b class="down">未達標</b>）';
     if(prev.mtbf!=null){
       const d = +(kd.mtbf-prev.mtbf).toFixed(1);
@@ -288,7 +288,7 @@ function renderSummary(){
   }
   if(kd.mttr!=null){
     const mttrOk = kd.mttr<=8;
-    txt += '平均 MTTR <b>'+kd.mttr+' h</b>（目標≤8h，';
+    txt += 'MTTR <b>'+kd.mttr+' h</b>（目標≤8h，';
     txt += mttrOk ? '<b class="up">達標</b>）。' : '<b class="down">超標</b>）。';
   }
   if(kd.faults!=null) txt += '共發生故障 <b>'+kd.faults+' 次</b>，總停工時數 <b>'+kd.downtime+' h</b>，涉及 <b>'+kd.machines+' 台</b>機台。';
@@ -533,6 +533,13 @@ function renderHealth(){
     sg.avgAvail = avails.length? Math.round(avails.reduce(function(a,b){return a+b;},0)/avails.length*10)/10 : null;
     sg.sumFaults= sg.machines.reduce(function(a,m){return a+(m._faults||0);},0);
     sg.minMtbf  = mbfs.length  ? Math.min.apply(null,mbfs) : null;
+    // 系列 KPI：合計法（含無故障的在用機台），由後端計算
+    var sk = (DATA.series_kpi||{})[sg.series];
+    var kk = sk && sk[curMonth||'全年'];
+    if(kk){
+      sg.avgMtbf = kk.mtbf; sg.avgMttr = kk.mttr; sg.avgAvail = kk.avail;
+      sg.sumFaults = kk.faults; sg.nAll = kk.n; sg.nFault = kk.n_fault;
+    }
   });
 
   // Sort series by avgMtbf asc (worst first)
@@ -556,8 +563,9 @@ function renderHealth(){
       +'<span class="hcsg-dot" style="background:'+col+'"></span>'
       +'<span class="hcsg-name">'+seriesName+'</span>'
       +'<span class="hcsg-label">'+sg.series+'</span>'
-      +'<span class="hcsg-kpi">MTBF '+(mb!=null&&!isNaN(mb)?mb+'h':'無資料')
-      +'　MTTR '+(sg.avgMttr!=null&&!isNaN(sg.avgMttr)?sg.avgMttr+'h':'無資料')
+      +'<span class="hcsg-kpi">'+(sg.nAll?'在用 '+sg.nAll+' 台・故障 '+(sg.nFault||0)+' 台　':'')
+      +'MTBF '+(mb!=null&&!isNaN(mb)?mb+'h':(sg.sumFaults===0?'無故障':'無資料'))
+      +'　MTTR '+(sg.avgMttr!=null&&!isNaN(sg.avgMttr)?sg.avgMttr+'h':(sg.sumFaults===0?'—':'無資料'))
       +'　可用率 '+(sg.avgAvail!=null&&!isNaN(sg.avgAvail)?sg.avgAvail+'%':'—')
       +'　故障 '+sg.sumFaults+'次'
       +'</span>'
@@ -590,8 +598,8 @@ function renderHealth(){
         +'<div class="top"><i style="background:'+col2+'"></i>'
         +'<span style="font-size:12px;font-weight:600">'+shortCode+'</span></div>'
         +'<div style="font-size:11.5px;color:var(--muted);margin-bottom:2px;line-height:1.3">'+m.name+'</div>'
-        +'<div class="big" style="color:'+col2+'">'+(mb2v?mb2+'h':'<span style="font-size:1rem;color:var(--muted)">無資料</span>')+'</div>'
-        +'<div class="meta">MTTR '+(m._mttr!=null&&!isNaN(m._mttr)?m._mttr+'h':'無資料')
+        +'<div class="big" style="color:'+col2+'">'+(mb2v?mb2+'h':'<span style="font-size:1rem;color:var(--muted)">'+(curMonth&&!m._faults?'本月無故障':'無資料')+'</span>')+'</div>'
+        +'<div class="meta">MTTR '+(m._mttr!=null&&!isNaN(m._mttr)?m._mttr+'h':(curMonth&&!m._faults?'—':'無資料'))
         +'　可用率 '+(m._avail!=null&&!isNaN(m._avail)?m._avail+'%':'—')+'</div>'
         +'<div class="meta">故障 '+(m._faults!=null?m._faults+'次':'—')+'</div>'
         +'<div class="detail" id="'+id+'d" style="display:none">'

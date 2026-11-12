@@ -7,7 +7,10 @@ import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-import re, json, base64, requests, io, os
+import re, json, base64, requests, io, os, unicodedata
+from equipment import parse_equipment_excel, map_repair_code, ACTIVE_STATUS
+from monthly_report import build_month_tables, to_excel, STATUS_STYLE, STATUS_ORDER
+import html as _html
 from datetime import datetime, date
 
 # ── 常數 ─────────────────────────────────────────────────────────────
@@ -394,6 +397,26 @@ hr {
     margin: 12px 0 !important;
 }
 
+/* 月度分析表 */
+.ma-wrap { overflow-x: auto; margin: 0 0 8px; }
+.ma-wrap { border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.ma-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: auto; }
+.ma-table th { background: var(--soft); color: var(--muted); font-weight: 600; padding: 8px 6px;
+    border-bottom: 1px solid var(--line); text-align: center; line-height: 1.35; font-size: 12.5px; }
+.ma-table td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: center;
+    vertical-align: top; font-variant-numeric: tabular-nums; }
+.ma-table td.l { text-align: left; }
+.ma-table td.txt { width: 40%; min-width: 280px; line-height: 1.55; color: var(--fg);
+    word-break: break-all; }
+.ma-table td.hot { color: #d64541; font-weight: 700; }
+.ma-table tr:last-child td { border-bottom: 0; }
+.st-pill { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px;
+    font-weight: 600; white-space: nowrap; }
+.ma-watch { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.ma-legend { font-size: 13px; color: var(--fg); line-height: 2.1; margin: 4px 0 10px; }
+.ma-rule { font-size: 12px; color: var(--muted); }
+.ma-sub { font-size: 12.5px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+
 /* plotly chart 容器圓角 */
 [data-testid="stPlotlyChart"] > div {
     border-radius: 12px !important;
@@ -482,7 +505,8 @@ def parse_excel(file_bytes):
     # 機台代碼：取 M-XXX-YYY-D[-穴] 完整代碼（如 M-302-010-1-1）
     def extract_code(n):
         if pd.isna(n): return None
-        m = re.search(r"M-\d{3}-\d{3}-\d+(?:-\d+)*", str(n))
+        m = re.search(r"M-\d{3}-\d{3}-\d+(?:-\d+)*",
+                      unicodedata.normalize("NFKC", str(n)))
         return m.group(0) if m else None
 
     df_all["機台代碼"] = df_all["設備名稱"].apply(extract_code)
@@ -496,6 +520,14 @@ def parse_excel(file_bytes):
             df_all[col] = pd.NaT
     df_all["缺料"]    = df_all["缺料"].astype(str).str.upper().isin(["是","有","YES"])
     df_all["完工超時"] = df_all["完工-超時"].notna() & (df_all["完工-超時"].astype(str).str.strip() != "")
+    # 單筆停工時數：只計「是否停機＝YES」；有時間戳用 08–20 上班時段計算，否則用維修時數
+    def _rec_down(r):
+        if not r["停機"]:
+            return 0.0
+        if pd.notna(r["建立時間"]) and pd.notna(r["完工時間"]):
+            return round(calc_window_hours(r["建立時間"], r["完工時間"]), 2)
+        return round(float(r["維修時數"]), 2)
+    df_all["停工時數(h)"] = df_all.apply(_rec_down, axis=1)
     df_all["機台名稱"] = df_all["設備名稱"].apply(
         lambda x: re.sub(r"^M-\d{3}-\d{3}-\d+(?:-\d+)*\s*", "", str(x)) if pd.notna(x) else "")
 
@@ -566,156 +598,194 @@ def calc_kpi(df_all, hours_base, special_off):
             })
     return pd.DataFrame(records)
 
+# ── 在用機台名冊 × 月份（含無故障機台）與合計法 KPI ─────────────────────
+def month_key_sort(m):
+    return MONTH_ORDER.index(m) if m in MONTH_ORDER else 99
+
+def load_roster(stored):
+    """在用機台名冊：優先用管理員上傳的設備清單，否則用 repo 內 equipment.json"""
+    if stored and stored.get("equipment"):
+        return stored["equipment"]
+    here = os.path.dirname(os.path.abspath(__file__))
+    fp = os.path.join(here, "equipment.json")
+    if os.path.exists(fp):
+        with open(fp, encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+def _month_end(mo):
+    m = re.match(r"(\d{4})-(\d+)月", mo)
+    if not m:
+        return None
+    return pd.Timestamp(int(m.group(1)), int(m.group(2)), 1) + pd.offsets.MonthEnd(0)
+
+def build_full(df_kpi, roster, hours_base, special_off):
+    """每月 × 在用機台一列；無報修的機台故障數 = 0。
+    停用/報廢/設計中/請購中等不在名冊的機台不計入。"""
+    num = ["故障次數", "停機次數", "停工時數(h)", "總維修時數(h)", "缺料件數", "超時完工件數"]
+    months = sorted(df_kpi["月份"].unique(), key=month_key_sort)
+    if not roster:                      # 無名冊：退回只用有報修的機台
+        k = df_kpi.copy()
+        k["使用狀態"] = "—"
+        k["月可用時數(h)"] = k["月份"].map(
+            lambda mo: max(hours_base.get(mo, 220) - special_off.get(mo, 0), 0))
+    else:
+        codes = {e["code"] for e in roster}
+        kk = df_kpi.copy()
+        kk["機台代碼"] = kk["機台代碼"].apply(lambda c: map_repair_code(c, codes))
+        kk = kk[kk["機台代碼"].notna()]
+        kg = kk.groupby(["月份", "機台代碼"])[num].sum().reset_index()
+        rows = []
+        for mo in months:
+            me = _month_end(mo)
+            ah = max(hours_base.get(mo, 220) - special_off.get(mo, 0), 0)
+            for e in roster:
+                ind = pd.to_datetime(e.get("in_date"), errors="coerce")
+                if me is not None and pd.notna(ind) and ind > me:
+                    continue            # 該月尚未入廠
+                rows.append({"月份": mo, "機台代碼": e["code"], "機台名稱": e.get("name", ""),
+                             "系列": e["series"],
+                             "設備類型": EQ_TYPE_MAP.get(e["code"][2:5], "其他"),
+                             "使用狀態": e.get("status", ""), "月可用時數(h)": ah})
+            # 名冊有子代碼、報修用上層代碼的情形 → 補列
+            extra = set(kg.loc[kg["月份"] == mo, "機台代碼"]) - {r["機台代碼"] for r in rows if r["月份"] == mo}
+            for c in extra:
+                rows.append({"月份": mo, "機台代碼": c,
+                             "機台名稱": SERIES_NAME.get(c[:9], ""), "系列": c[:9],
+                             "設備類型": EQ_TYPE_MAP.get(c[2:5], "其他"),
+                             "使用狀態": "使用中", "月可用時數(h)": ah})
+        k = pd.DataFrame(rows).merge(kg, on=["月份", "機台代碼"], how="left")
+    for c in num:
+        k[c] = k[c].fillna(0)
+    for c in ["故障次數", "停機次數", "缺料件數", "超時完工件數"]:
+        k[c] = k[c].astype(int)
+    k["運作時數(h)"] = (k["月可用時數(h)"] - k["停工時數(h)"]).clip(lower=0).round(2)
+    f = k["故障次數"]
+    k["MTBF(h)"] = (k["運作時數(h)"] / f.where(f > 0)).round(2)
+    k["MTTR(h)"] = (k["總維修時數(h)"] / f.where(f > 0)).round(2)
+    k["可用率(%)"] = (k["運作時數(h)"] / k["月可用時數(h)"].where(k["月可用時數(h)"] > 0) * 100).round(2)
+    k["重複故障"] = (f >= 2).astype(int)
+    return k.reset_index(drop=True)
+
+def pool(df):
+    """合計法：MTBF = Σ(月時數−停工) ÷ Σ故障；MTTR = Σ維修時數 ÷ Σ故障；可用率 = Σ運作 ÷ Σ月時數"""
+    f   = int(df["故障次數"].sum()) if len(df) else 0
+    rep = float(df["總維修時數(h)"].sum()) if len(df) else 0.0
+    ah  = float(df["月可用時數(h)"].sum()) if len(df) else 0.0
+    op  = float(df["運作時數(h)"].sum()) if len(df) else 0.0
+    return {
+        "faults": f,
+        "stops": int(df["停機次數"].sum()) if len(df) else 0,
+        "repair": round(rep, 2),
+        "downtime": round(float(df["停工時數(h)"].sum()), 2) if len(df) else 0.0,
+        "hours": round(ah, 2), "op": round(op, 2),
+        "n": int(df["機台代碼"].nunique()) if len(df) else 0,
+        "n_fault": int(df.loc[df["故障次數"] > 0, "機台代碼"].nunique()) if len(df) else 0,
+        "mtbf": round(op / f, 2) if f else None,
+        "mttr": round(rep / f, 2) if f else None,
+        "avail": round(op / ah * 100, 2) if ah else None,
+    }
+
+def judge(faults, mtbf, mttr):
+    """狀態判定"""
+    if not faults:
+        return "表現卓越"
+    if mtbf is not None and mtbf < 50:
+        return "需重點改善"
+    if (mtbf is not None and mtbf < THRESHOLD_MTBF) or (mttr is not None and mttr > THRESHOLD_MTTR):
+        return "需改善"
+    return "正常"
+
+def _summary_row(mk):
+    p = pool(mk)
+    return {
+        "在用機台數": p["n"], "涉及機台數": p["n_fault"],
+        "故障次數": p["faults"], "停工時數(h)": p["downtime"],
+        "平均MTBF(h)": p["mtbf"], "平均MTTR(h)": p["mttr"],
+        "平均可用率(%)": p["avail"],
+        "重複故障台數": int(mk["重複故障"].sum()),
+    }
+
 def monthly_summary(df_kpi, hours_base, special_off):
     rows = []
-    for month in sorted(df_kpi["月份"].unique(),
-                        key=lambda x: MONTH_ORDER.index(x) if x in MONTH_ORDER else 99):
+    for month in sorted(df_kpi["月份"].unique(), key=month_key_sort):
         mk = df_kpi[df_kpi["月份"] == month]
-        base    = hours_base.get(month, 220)
-        extra   = special_off.get(month, 0)
-        avail_h = max(base - extra, 0)
-        rows.append({
-            "月份": month,
-            "涉及機台數": mk["機台代碼"].nunique(),
-            "故障次數": int(mk["故障次數"].sum()),
-            "停工時數(h)": round(mk["停工時數(h)"].sum(), 2),
-            "平均MTBF(h)": round(mk["MTBF(h)"].mean(), 2),
-            "平均MTTR(h)": round(mk["MTTR(h)"].mean(), 2),
-            "平均可用率(%)": round(mk["可用率(%)"].mean(), 2),
-            "重複故障台數": int(mk["重複故障"].sum()),
-            "月可用時數(h)": avail_h,
-        })
+        rows.append({"月份": month, **_summary_row(mk),
+                     "月可用時數(h)": max(hours_base.get(month, 220) - special_off.get(month, 0), 0)})
     return pd.DataFrame(rows)
 
 def monthly_summary_by_type(df_kpi, hours_base, special_off):
-    """各設備類型 × 月份彙總"""
+    """各設備類型 × 月份彙總（合計法）"""
     rows = []
     for eq_type in EQ_TYPE_ORDER:
         sub = df_kpi[df_kpi["設備類型"] == eq_type]
-        if sub.empty:
-            continue
-        for month in sorted(sub["月份"].unique(),
-                            key=lambda x: MONTH_ORDER.index(x) if x in MONTH_ORDER else 99):
-            mk = sub[sub["月份"] == month]
-            rows.append({
-                "設備類型": eq_type,
-                "月份": month,
-                "涉及機台數": mk["機台代碼"].nunique(),
-                "故障次數": int(mk["故障次數"].sum()),
-                "停工時數(h)": round(mk["停工時數(h)"].sum(), 2),
-                "平均MTBF(h)": round(mk["MTBF(h)"].mean(), 2),
-                "平均MTTR(h)": round(mk["MTTR(h)"].mean(), 2),
-                "平均可用率(%)": round(mk["可用率(%)"].mean(), 2),
-                "重複故障台數": int(mk["重複故障"].sum()),
-            })
+        for month in sorted(sub["月份"].unique(), key=month_key_sort):
+            rows.append({"設備類型": eq_type, "月份": month,
+                         **_summary_row(sub[sub["月份"] == month])})
     return pd.DataFrame(rows)
 
 def build_dashboard_json(df_kpi, hours_base, special_off, updated=""):
-    """Build JSON payload for dashboard_reliability.html template."""
-    months_sorted = sorted(df_kpi["月份"].unique(),
-                           key=lambda x: MONTH_ORDER.index(x) if x in MONTH_ORDER else 99)
+    """Build JSON payload for dashboard_reliability.html template（合計法）。"""
+    months_sorted = sorted(df_kpi["月份"].unique(), key=month_key_sort)
     short_months = [m.replace("2026-","") for m in months_sorted]
-
     types_all = ["全部"] + EQ_TYPE_ORDER
+    r1 = lambda v: None if v is None else round(v, 1)
 
     def kpi_for(subset, month_key):
-        if month_key == "全年":
-            df = subset
-            # For overall KPIs, average across all months per machine, then mean
-            if df.empty:
-                return {}
-            m_avail = round(df["可用率(%)"].mean(), 1)
-            m_mtbf  = round(df["MTBF(h)"].mean(), 1)
-            m_mttr  = round(df["MTTR(h)"].mean(), 1)
-            m_down  = round(df["停工時數(h)"].sum(), 1)
-            m_faults= int(df["故障次數"].sum())
-            m_mach  = df["機台代碼"].nunique()
-            m_low   = int((df.groupby("機台代碼")["可用率(%)"].mean() < THRESHOLD_AVAIL).sum())
-        else:
-            full_key = "2026-" + month_key
-            df = subset[subset["月份"] == full_key]
-            if df.empty:
-                return {}
-            m_avail = round(df["可用率(%)"].mean(), 1)
-            m_mtbf  = round(df["MTBF(h)"].mean(), 1)
-            m_mttr  = round(df["MTTR(h)"].mean(), 1)
-            m_down  = round(df["停工時數(h)"].sum(), 1)
-            m_faults= int(df["故障次數"].sum())
-            m_mach  = df["機台代碼"].nunique()
-            m_low   = int((df["可用率(%)"] < THRESHOLD_AVAIL).sum())
-        return {
-            "avail": m_avail, "mtbf": m_mtbf, "mttr": m_mttr,
-            "downtime": m_down, "faults": m_faults,
-            "machines": m_mach, "low_avail": m_low,
-        }
+        df = subset if month_key == "全年" else subset[subset["月份"] == "2026-" + month_key]
+        if df.empty:
+            return {}
+        p = pool(df)
+        per_m = df.groupby("機台代碼")[["運作時數(h)", "月可用時數(h)"]].sum()
+        low = int(((per_m["運作時數(h)"] / per_m["月可用時數(h)"] * 100) < THRESHOLD_AVAIL).sum())
+        return {"avail": r1(p["avail"]), "mtbf": r1(p["mtbf"]), "mttr": r1(p["mttr"]),
+                "downtime": r1(p["downtime"]), "faults": p["faults"],
+                "machines": p["n_fault"], "active": p["n"], "low_avail": low}
 
-    kpis = {}
+    kpis, trend = {}, {}
     for t in types_all:
         sub = df_kpi if t == "全部" else df_kpi[df_kpi["設備類型"] == t]
-        kpis[t] = {}
-        kpis[t]["全年"] = kpi_for(sub, "全年")
+        kpis[t] = {"全年": kpi_for(sub, "全年")}
+        rows = []
         for sm in short_months:
             kd = kpi_for(sub, sm)
             if kd:
                 kpis[t][sm] = kd
-
-    # Trend: per type, per month
-    trend = {}
-    for t in types_all:
-        sub = df_kpi if t == "全部" else df_kpi[df_kpi["設備類型"] == t]
-        rows = []
-        for i, sm in enumerate(short_months):
-            full_key = "2026-" + sm
-            df_m = sub[sub["月份"] == full_key]
-            if df_m.empty:
-                continue
-            rows.append({
-                "m": sm,
-                "avail":    round(df_m["可用率(%)"].mean(), 1),
-                "mtbf":     round(df_m["MTBF(h)"].mean(), 1),
-                "mttr":     round(df_m["MTTR(h)"].mean(), 1),
-                "downtime": round(df_m["停工時數(h)"].sum(), 1),
-                "faults":   int(df_m["故障次數"].sum()),
-            })
+                rows.append({"m": sm, "avail": kd["avail"], "mtbf": kd["mtbf"], "mttr": kd["mttr"],
+                             "downtime": kd["downtime"], "faults": kd["faults"]})
         trend[t] = rows
 
-    # Machines: aggregate across all months + monthly breakdown
-    machines = []
-    for code, grp in df_kpi.groupby("機台代碼"):
-        if not code:
-            continue
-        name = grp["機台名稱"].iloc[0]
-        eq_type = grp["設備類型"].iloc[0]
-        series  = grp["系列"].iloc[0]
-        overall_avail = round(grp["可用率(%)"].mean(), 1)
-        overall_mtbf  = round(grp["MTBF(h)"].mean(), 1)
-        overall_mttr  = round(grp["MTTR(h)"].mean(), 1)
-        overall_faults = int(grp["故障次數"].sum())
-        overall_down   = round(grp["停工時數(h)"].sum(), 1)
+    # 系列 KPI（合計法，含無故障機台）
+    series_kpi = {}
+    for sc, grp in df_kpi.groupby("系列"):
+        d = {}
+        for key, g in [("全年", grp)] + [(sm, grp[grp["月份"] == "2026-" + sm]) for sm in short_months]:
+            if g.empty:
+                continue
+            p = pool(g)
+            d[key] = {"mtbf": r1(p["mtbf"]), "mttr": r1(p["mttr"]), "avail": r1(p["avail"]),
+                      "faults": p["faults"], "n": p["n"], "n_fault": p["n_fault"]}
+        series_kpi[sc] = d
 
+    # 機台：只列有故障的機台；全年值 = 合計法（含無故障月份）
+    machines = []
+    fault_codes = df_kpi.loc[df_kpi["故障次數"] > 0, "機台代碼"].unique()
+    for code, grp in df_kpi[df_kpi["機台代碼"].isin(fault_codes)].groupby("機台代碼"):
+        p = pool(grp)
         monthly = []
         for sm in short_months:
-            full_key = "2026-" + sm
-            dm = grp[grp["月份"] == full_key]
+            dm = grp[(grp["月份"] == "2026-" + sm) & (grp["故障次數"] > 0)]
             if dm.empty:
                 continue
             row = dm.iloc[0]
-            monthly.append({
-                "m": sm,
-                "avail":    round(row["可用率(%)"], 1),
-                "mtbf":     round(row["MTBF(h)"], 1),
-                "mttr":     round(row["MTTR(h)"], 1),
-                "faults":   int(row["故障次數"]),
-                "downtime": round(row["停工時數(h)"], 1),
-            })
-
+            monthly.append({"m": sm, "avail": r1(row["可用率(%)"]), "mtbf": r1(row["MTBF(h)"]),
+                            "mttr": r1(row["MTTR(h)"]), "faults": int(row["故障次數"]),
+                            "downtime": r1(row["停工時數(h)"])})
         machines.append({
-            "code": code, "name": name,
-            "type": eq_type, "series": series,
-            "avail": overall_avail, "mtbf": overall_mtbf,
-            "mttr": overall_mttr, "faults": overall_faults,
-            "downtime": overall_down,
-            "monthly": monthly,
+            "code": code, "name": grp["機台名稱"].iloc[0],
+            "type": grp["設備類型"].iloc[0], "series": grp["系列"].iloc[0],
+            "avail": r1(p["avail"]), "mtbf": r1(p["mtbf"]), "mttr": r1(p["mttr"]),
+            "faults": p["faults"], "downtime": r1(p["downtime"]), "monthly": monthly,
         })
 
     # Series display names (from Excel mapping)
@@ -765,6 +835,7 @@ def build_dashboard_json(df_kpi, hours_base, special_off, updated=""):
         "kpis": kpis,
         "trend": trend,
         "machines": machines,
+        "series_kpi": series_kpi,
         "series_names": series_names,
     }
 
@@ -789,6 +860,125 @@ def avail_badge(val):
     elif val >= 80:
         return f'<span class="badge badge-amber">△ {val}%</span>'
     return f'<span class="badge badge-red">✗ {val}%</span>'
+
+def _status_pill(v):
+    bg, fg = STATUS_STYLE.get(v, ("#f1f3f6", "#6b7684"))
+    return (f'<span class="st-pill" style="background:{bg};color:{fg}">{_html.escape(str(v))}</span>')
+
+def _num(v, unit=""):
+    if isinstance(v, str):
+        return _html.escape(v)
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return "—"
+    return f"{v:,.2f}".rstrip("0").rstrip(".") + unit
+
+def render_monthly_analysis(df_kpi, df_raw, months_avail, excluded):
+    st.markdown('<div class="section-title">月度可靠性分析</div>', unsafe_allow_html=True)
+    st.caption("系列＝合計法：MTBF＝(在用台數×月標準時數 − 停工合計)÷故障合計，MTTR＝維修工時合計÷故障合計；"
+               "每張報修單算 1 次故障，停工只計「是否停機＝YES」。"
+               "只計使用中／測試中／驗證中的 M-301／302／303 機台。")
+    c1, c2, c3 = st.columns([2, 2, 3])
+    month = c1.selectbox("分析月份", list(reversed(months_avail)), key="ma_month")
+    typ = c2.selectbox("設備類型", ["全部"] + EQ_TYPE_ORDER, key="ma_type")
+    show = c3.radio("顯示系列", ["全部", "只看有故障", "只看需改善"], horizontal=True, key="ma_show")
+
+    dk = df_kpi if typ == "全部" else df_kpi[df_kpi["設備類型"] == typ]
+    dr = df_raw if typ == "全部" else df_raw[df_raw["設備類型"] == typ]
+    df_s, df_m = build_month_tables(month, dk, dr, pool, judge, SERIES_NAME)
+    if df_s.empty:
+        st.info("此月份無資料")
+        return
+
+    # ── KPI 列 ──
+    p = pool(dk[dk["月份"] == month])
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("月標準時數", f"{df_s['月標準時數'].iloc[0]:g} h")
+    k2.metric("在用／故障機台", f"{p['n']}／{p['n_fault']} 台")
+    k3.metric("故障次數", f"{p['faults']} 次")
+    k4.metric("MTBF（合計）", f"{p['mtbf']} h" if p["mtbf"] is not None else "無故障",
+              "✓ 達標" if (p["mtbf"] or 1e9) >= THRESHOLD_MTBF else f"目標≥{THRESHOLD_MTBF:g}h",
+              delta_color="normal" if (p["mtbf"] or 1e9) >= THRESHOLD_MTBF else "inverse")
+    k5.metric("MTTR（合計）", f"{p['mttr']} h" if p["mttr"] is not None else "—",
+              "✓ 達標" if (p["mttr"] or 0) <= THRESHOLD_MTTR else f"目標≤{THRESHOLD_MTTR:g}h",
+              delta_color="normal" if (p["mttr"] or 0) <= THRESHOLD_MTTR else "inverse")
+
+    cnt_s = df_s["狀態判定"].value_counts()
+    cnt_m = df_m["狀態判定"].value_counts()
+    order = ["需重點改善", "需改善", "正常", "表現卓越"]
+    st.markdown(
+        '<div class="ma-legend">系列：' + "".join(f"{_status_pill(o)} {int(cnt_s.get(o,0))}　" for o in order)
+        + '<br>機台：' + "".join(f"{_status_pill(o)} {int(cnt_m.get(o,0))}　" for o in order)
+        + '<br><span class="ma-rule">判定：無故障＝表現卓越；MTBF＜50h＝需重點改善；'
+          f'MTBF＜{THRESHOLD_MTBF:g}h 或 MTTR＞{THRESHOLD_MTTR:g}h＝需改善；其餘＝正常</span></div>',
+        unsafe_allow_html=True)
+
+    st.download_button(
+        "⬇ 下載本月分析 Excel",
+        data=to_excel(df_s, df_m, month),
+        file_name=f"設備可靠性月度分析_{month}{'' if typ=='全部' else '_'+typ}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="ma_dl")
+
+    # ── 系列表（合計）──
+    view = df_s.copy()
+    if show == "只看有故障":
+        view = view[view["故障總次數"] > 0]
+    elif show == "只看需改善":
+        view = view[view["狀態判定"].isin(["需重點改善", "需改善"])]
+    view = view.assign(_o=view["狀態判定"].map(STATUS_ORDER)).sort_values(["設備類型", "設備系列"])
+    for t in [x for x in EQ_TYPE_ORDER if x in set(view["設備類型"])]:
+        vt = view[view["設備類型"] == t]
+        st.markdown(f'<div class="type-header"><i style="background:'
+                    f'{ {"成型類":"#2563c9","加工類":"#2e9d57","包裝類":"#f0a020"}.get(t,"#2563c9") }'
+                    f'"></i>{t}　<span class="ma-sub">{len(vt)} 個系列</span></div>',
+                    unsafe_allow_html=True)
+        head = ["設備名稱", "設備系列", "在用／<br>故障台數", "故障<br>總次數", "總維修<br>工時(H)",
+                "總維修<br>停工時間(H)", "MTBF<br>(小時/次)", "MTTR<br>(小時/次)", "狀態判定", "分析與建議"]
+        rows = []
+        for _, r in vt.iterrows():
+            red = ' class="hot"' if r["故障總次數"] >= 5 else ""
+            watch = (f'<div class="ma-watch">需關注：{_html.escape(r["需關注機台"])}</div>'
+                     if r["需關注機台"] else "")
+            rows.append(
+                "<tr>"
+                f"<td class='l'>{_html.escape(str(r['設備名稱']))}</td>"
+                f"<td>{r['設備系列']}</td>"
+                f"<td>{r['在用台數']}／{r['故障台數']}</td>"
+                f"<td{red}>{r['故障總次數']}</td>"
+                f"<td>{_num(r['總維修工時(H)'])}</td>"
+                f"<td>{_num(r['總維修停工時間(H)'])}</td>"
+                f"<td>{_num(r['MTBF(小時/次)'])}</td>"
+                f"<td>{_num(r['MTTR(小時/次)'])}</td>"
+                f"<td>{_status_pill(r['狀態判定'])}</td>"
+                f"<td class='l txt'>{_html.escape(r['分析與建議'])}{watch}</td>"
+                "</tr>")
+        st.markdown('<div class="ma-wrap"><table class="ma-table"><thead><tr>'
+                    + "".join(f"<th>{h}</th>" for h in head) + "</tr></thead><tbody>"
+                    + "".join(rows) + "</tbody></table></div>", unsafe_allow_html=True)
+
+    # ── 機台表（個別）──
+    st.markdown('<div class="section-title">機台明細（個別）</div>', unsafe_allow_html=True)
+    only_f = st.checkbox("只顯示本月有故障的機台", value=True, key="ma_only_f")
+    dm = df_m[df_m["故障次數"] > 0] if only_f else df_m
+    dm = dm.assign(_o=dm["狀態判定"].map(STATUS_ORDER)).sort_values(["_o", "設備代號"]).drop(columns="_o")
+    def _st_color(v):
+        bg, fg = STATUS_STYLE.get(v, ("", ""))
+        return f"background-color:{bg};color:{fg};font-weight:600" if bg else ""
+    st.dataframe(
+        dm[["設備代號", "設備名稱", "設備系列", "故障次數", "總維修工時(H)", "總維修停工時間(H)",
+            "MTBF(小時/次)", "MTTR(小時/次)", "狀態判定", "主要故障"]]
+          .style.map(_st_color, subset=["狀態判定"])
+          .format({"總維修工時(H)": "{:.2f}", "總維修停工時間(H)": "{:.2f}", "MTTR(小時/次)": "{:.2f}",
+                   "MTBF(小時/次)": lambda v: v if isinstance(v, str) else f"{v:.2f}"}),
+        use_container_width=True, hide_index=True,
+        column_config={"主要故障": st.column_config.TextColumn(width="large")})
+
+    # ── 未列入計算的報修單 ──
+    ex = excluded[excluded["月份"] == month] if len(excluded) else excluded
+    if len(ex):
+        with st.expander(f"未列入計算的報修單（{len(ex)} 筆：機台不在在用名冊，如停用、報廢或非 M-301/302/303）"):
+            cols = [c for c in ["原始代碼", "機台名稱", "需求", "維修時數", "停機"] if c in ex.columns]
+            st.dataframe(ex[cols], use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════
 def main():
@@ -817,6 +1007,29 @@ def main():
         with up_col:
             up_file = st.file_uploader("上傳報修 Excel（含時數工作表）",
                                        type=["xlsx"], key="uploader")
+            eq_file = st.file_uploader(
+                "上傳設備清單 Excel（選用：更新在用機台名冊）", type=["xlsx"], key="eq_uploader",
+                help="只取 M-301 / M-302 / M-303 工作表；使用狀態為 使用中、測試中、驗證中 才列入")
+            _roster_now = load_roster(stored)
+            st.caption(f"目前在用機台名冊：{len(_roster_now)} 台"
+                       + ("（已上傳的設備清單）" if stored and stored.get("equipment") else "（預設設備清單）"))
+            if eq_file:
+                try:
+                    eq_new = parse_equipment_excel(eq_file.getvalue())
+                except Exception as ex:
+                    eq_new = []
+                    st.error(f"設備清單解析失敗：{ex}")
+                if eq_new:
+                    st.info(f"解析到在用機台 {len(eq_new)} 台（{'、'.join(ACTIVE_STATUS)}）")
+                    if stored and st.button("儲存設備清單"):
+                        stored["equipment"] = eq_new
+                        ok, msg = save_data(stored)
+                        if ok:
+                            st.toast("✅ 設備清單已更新")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(msg)
         with sp_col:
             with st.expander("📅 特殊停工調整（颱風、旅遊…）"):
                 st.caption("填入該月額外未開工的時數，系統自動從可用時數扣除")
@@ -846,7 +1059,7 @@ def main():
                 st.success(f"✓ 解析完成：{len(df_all_new)} 筆記錄，發現系列：{', '.join(sorted(series_found)[:10])}{'…' if len(series_found)>10 else ''}")
                 df_kpi_new = calc_kpi(df_all_new, hours_base_new, special_off)
                 raw_cols = ["月份","機台代碼","機台名稱","系列","設備類型","維修時數","停機","缺料","完工超時"]
-                for col in ["需求","部門","設備名稱"]:
+                for col in ["需求","部門","設備名稱","seq","停工時數(h)"]:
                     if col in df_all_new.columns:
                         raw_cols.append(col)
                 payload = {
@@ -856,6 +1069,8 @@ def main():
                     "kpi": df_kpi_new.to_dict(orient="records"),
                     "raw": df_all_new[raw_cols].to_dict(orient="records"),
                 }
+                if stored and stored.get("equipment"):
+                    payload["equipment"] = stored["equipment"]
                 ok, msg = save_data(payload)
                 if ok:
                     st.toast("✅ 資料已儲存！頁面更新中…")
@@ -903,6 +1118,21 @@ def main():
             m = re.match(r"M-(\d{3})", code)
             return EQ_TYPE_MAP.get(m.group(1), "其他") if m else "其他"
         df_raw["設備類型"] = df_raw["機台代碼"].apply(_type2)
+
+    # ── 在用機台名冊：補入無故障機台、排除停用/報廢等 ──
+    roster = load_roster(stored)
+    if roster:
+        _codes = {e["code"] for e in roster}
+        _name = {e["code"]: e.get("name", "") for e in roster}
+        df_raw["原始代碼"] = df_raw["機台代碼"]
+        df_raw["機台代碼"] = df_raw["機台代碼"].apply(lambda c: map_repair_code(c, _codes))
+        excluded = df_raw[df_raw["機台代碼"].isna() & df_raw["原始代碼"].notna()]
+        df_raw = df_raw[df_raw["機台代碼"].notna()].copy()
+    else:
+        excluded = df_raw.iloc[0:0]
+    if "停工時數(h)" not in df_raw.columns:      # 舊資料：無單筆停工 → 停機單用維修時數
+        df_raw["停工時數(h)"] = df_raw["維修時數"].where(df_raw["停機"].astype(bool), 0.0)
+    df_kpi = build_full(df_kpi, roster, hours_base, special_off)
 
     months_avail = sorted(df_kpi["月份"].unique(),
                           key=lambda x: MONTH_ORDER.index(x) if x in MONTH_ORDER else 99)
@@ -961,8 +1191,8 @@ def main():
         ds = df_summary[df_summary["月份"].isin(sel_months)]
 
         # ══ 分頁 ═══════════════════════════════════════════════════════════
-        tab1, tab2, tab3, tab4 = st.tabs(
-            ["📊 月別總覽", "🔧 機台明細", "⚠️ 故障分析", "📈 趨勢分析"])
+        tab5, tab1, tab2, tab3, tab4 = st.tabs(
+            ["📝 月度分析", "📊 月別總覽", "🔧 機台明細", "⚠️ 故障分析", "📈 趨勢分析"])
 
         # ══ Tab1：月別總覽（大類 → 系列代碼一覽表）════════════════════════════
         with tab1:
@@ -995,18 +1225,18 @@ def main():
 
                 # ── 大類 KPI 摘要卡 ──
                 k1, k2, k3, k4, k5 = st.columns(5)
-                t_machines = dk_type["機台代碼"].nunique()
-                t_fail  = int(dk_type["故障次數"].sum())
-                t_down  = round(dk_type["停工時數(h)"].sum(), 2)
-                t_mtbf  = round(dk_type["MTBF(h)"].mean(), 2)
-                t_avail = round(dk_type["可用率(%)"].mean(), 2)
-                k1.metric("涉及機台數", f"{t_machines} 台")
+                tp = pool(dk_type)
+                t_fail  = tp["faults"]
+                t_down  = tp["downtime"]
+                t_mtbf  = tp["mtbf"] if tp["mtbf"] is not None else 0
+                t_avail = tp["avail"] if tp["avail"] is not None else 0
+                k1.metric("在用／故障機台", f"{tp['n']}／{tp['n_fault']} 台")
                 k2.metric("故障次數", f"{t_fail} 次")
                 k3.metric("總停工時數", f"{t_down} h")
-                k4.metric("平均MTBF", f"{t_mtbf} h",
-                          "✓ 達標" if t_mtbf >= THRESHOLD_MTBF else f"目標≥{THRESHOLD_MTBF}h",
-                          delta_color="normal" if t_mtbf >= THRESHOLD_MTBF else "inverse")
-                k5.metric("平均可用率", f"{t_avail}%",
+                k4.metric("MTBF（合計）", f"{tp['mtbf']} h" if tp["mtbf"] is not None else "無故障",
+                          "✓ 達標" if t_mtbf >= THRESHOLD_MTBF or not t_fail else f"目標≥{THRESHOLD_MTBF}h",
+                          delta_color="normal" if t_mtbf >= THRESHOLD_MTBF or not t_fail else "inverse")
+                k5.metric("可用率（合計）", f"{t_avail}%",
                           "✓ 達標" if t_avail >= THRESHOLD_AVAIL else f"目標≥{THRESHOLD_AVAIL}%",
                           delta_color="normal" if t_avail >= THRESHOLD_AVAIL else "inverse")
 
@@ -1017,18 +1247,23 @@ def main():
                 tbl_rows = []
                 for sc in series_list:
                     sk = dk_type[dk_type["系列"] == sc]
+                    sp = pool(sk)
                     tbl_rows.append({
                         "系列代碼": sc,
                         "設備名稱": SERIES_NAME.get(sc, ""),
-                        "台數": sk["機台代碼"].nunique(),
-                        "故障次數": int(sk["故障次數"].sum()),
-                        "停工時數(h)": round(sk["停工時數(h)"].sum(), 2),
-                        "平均MTBF(h)": round(sk["MTBF(h)"].mean(), 2),
-                        "平均MTTR(h)": round(sk["MTTR(h)"].mean(), 2),
-                        "平均可用率(%)": round(sk["可用率(%)"].mean(), 2),
+                        "在用台數": sp["n"],
+                        "故障台數": sp["n_fault"],
+                        "故障次數": sp["faults"],
+                        "停工時數(h)": sp["downtime"],
+                        "平均MTBF(h)": sp["mtbf"],
+                        "平均MTTR(h)": sp["mttr"],
+                        "平均可用率(%)": sp["avail"],
                         "重複故障台數": int(sk["重複故障"].sum()),
                     })
                 df_tbl = pd.DataFrame(tbl_rows)
+                for _c in ["平均MTBF(h)", "平均MTTR(h)", "平均可用率(%)"]:
+                    if _c in df_tbl.columns:
+                        df_tbl[_c] = pd.to_numeric(df_tbl[_c], errors="coerce")
 
                 if not df_tbl.empty:
                     styled = (df_tbl.style
@@ -1039,7 +1274,7 @@ def main():
                             "平均MTBF(h)": "{:.2f}",
                             "平均MTTR(h)": "{:.2f}",
                             "平均可用率(%)": "{:.2f}",
-                        }))
+                        }, na_rep="無故障"))
                     st.dataframe(styled, use_container_width=True, hide_index=True)
 
                     # ── 停工時數橫條圖（只顯示有故障的系列）──
@@ -1087,17 +1322,25 @@ def main():
             st.markdown('<div class="section-title">機台明細 — MTBF / MTTR / 可用率</div>',
                         unsafe_allow_html=True)
 
-            agg = dk.groupby(["機台代碼","機台名稱","系列","設備類型"]).agg(
-                故障次數=("故障次數","sum"),
-                停機次數=("停機次數","sum"),
-                停工時數=("停工時數(h)","sum"),
-                總維修時數=("總維修時數(h)","sum"),
-                平均MTBF=("MTBF(h)","mean"),
-                平均MTTR=("MTTR(h)","mean"),
-                平均可用率=("可用率(%)","mean"),
-                重複故障月數=("重複故障","sum"),
-            ).reset_index().round(2)
-            agg = agg.sort_values("停工時數", ascending=False)
+            show_zero = st.checkbox("顯示無故障的在用機台", value=False, key="t2_zero")
+            _rows = []
+            for (code, name, ser, typ), g in dk.groupby(["機台代碼","機台名稱","系列","設備類型"]):
+                pp = pool(g)
+                if not show_zero and pp["faults"] == 0:
+                    continue
+                _rows.append({"機台代碼": code, "機台名稱": name, "系列": ser, "設備類型": typ,
+                              "故障次數": pp["faults"], "停機次數": pp["stops"],
+                              "停工時數": pp["downtime"], "總維修時數": pp["repair"],
+                              "平均MTBF": pp["mtbf"], "平均MTTR": pp["mttr"],
+                              "平均可用率": pp["avail"],
+                              "重複故障月數": int(g["重複故障"].sum())})
+            agg = pd.DataFrame(_rows, columns=["機台代碼","機台名稱","系列","設備類型","故障次數",
+                                               "停機次數","停工時數","總維修時數","平均MTBF",
+                                               "平均MTTR","平均可用率","重複故障月數"])
+            for _c in ["平均MTBF", "平均MTTR", "平均可用率"]:
+                agg[_c] = pd.to_numeric(agg[_c], errors="coerce")
+            agg = agg.sort_values(["停工時數","故障次數"], ascending=False)
+            st.caption("MTBF／MTTR／可用率為選定期間合計：MTBF＝Σ(月時數−停工)÷Σ故障；無故障月份的運作時數也計入。")
 
             def color_avail(val):
                 if not isinstance(val, (int, float)): return ""
@@ -1114,7 +1357,7 @@ def main():
                        "平均MTBF":  "{:.2f}",
                        "平均MTTR":  "{:.2f}",
                        "平均可用率": "{:.2f}",
-                   }),
+                   }, na_rep="無故障"),
                 use_container_width=True, hide_index=True)
 
             st.markdown("---")
@@ -1125,7 +1368,7 @@ def main():
                 float_cols_dm = ["停工時數(h)", "MTBF(h)", "MTTR(h)", "可用率(%)"]
                 st.dataframe(
                     dm[["月份","故障次數","停機次數","停工時數(h)","MTBF(h)","MTTR(h)","可用率(%)"]
-                      ].style.format({c: "{:.2f}" for c in float_cols_dm}),
+                      ].style.format({c: "{:.2f}" for c in float_cols_dm}, na_rep="無故障"),
                     use_container_width=True, hide_index=True)
 
         # ══ Tab3：故障分析 ═════════════════════════════════════════════════
@@ -1320,8 +1563,9 @@ def main():
                 st.markdown(
                     f'<div class="type-header"><i style="background:{type_color}"></i>'
                     f'{eq_type}</div>', unsafe_allow_html=True)
-                pivot = dk_hm.pivot_table(values="可用率(%)",
-                                          index="系列", columns="月份", aggfunc="mean").round(2)
+                _g = dk_hm.groupby(["系列","月份"])[["運作時數(h)","月可用時數(h)"]].sum()
+                _g["可用率"] = _g["運作時數(h)"] / _g["月可用時數(h)"] * 100
+                pivot = _g["可用率"].unstack("月份").round(2)
                 ordered_cols = [c for c in MONTH_ORDER if c in pivot.columns]
                 pivot = pivot[ordered_cols]
                 # 短月份標籤
@@ -1339,6 +1583,10 @@ def main():
                 fig_hm.update_xaxes(side="bottom", tickangle=0, tickfont=dict(size=13))
                 fig_hm.update_yaxes(tickfont=dict(size=13))
                 st.plotly_chart(fig_hm, use_container_width=True)
+
+        # ══ Tab5：月度分析（系列合計＋機台個別）══════════════════════════
+        with tab5:
+            render_monthly_analysis(df_kpi, df_raw, months_avail, excluded)
 
         st.markdown("---")
         st.caption("富強醫材股份有限公司 設備課　© 2026")
