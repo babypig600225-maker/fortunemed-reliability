@@ -518,14 +518,14 @@ function renderHealth(){
   // Sort each series' machines by MTBF asc
   Object.values(seriesMap).forEach(function(sg){
     sg.machines.sort(function(a,b){
-      if(a._mtbf===null) return 1;
-      if(b._mtbf===null) return -1;
+      if(a._mtbf==null||isNaN(a._mtbf)) return 1;
+      if(b._mtbf==null||isNaN(b._mtbf)) return -1;
       return a._mtbf - b._mtbf;
     });
     // Series-level aggregate: avg MTBF, avg MTTR, avg avail, sum faults
-    var mbfs = sg.machines.map(function(m){return m._mtbf;}).filter(function(v){return v!==null;});
-    var mttrs = sg.machines.map(function(m){return m._mttr;}).filter(function(v){return v!==null;});
-    var avails= sg.machines.map(function(m){return m._avail;}).filter(function(v){return v!==null;});
+    var mbfs = sg.machines.map(function(m){return m._mtbf;}).filter(function(v){return v!=null&&!isNaN(v);});
+    var mttrs = sg.machines.map(function(m){return m._mttr;}).filter(function(v){return v!=null&&!isNaN(v);});
+    var avails= sg.machines.map(function(m){return m._avail;}).filter(function(v){return v!=null&&!isNaN(v);});
     sg.avgMtbf  = mbfs.length  ? Math.round(mbfs.reduce(function(a,b){return a+b;},0)/mbfs.length*10)/10 : null;
     sg.avgMttr  = mttrs.length ? Math.round(mttrs.reduce(function(a,b){return a+b;},0)/mttrs.length*10)/10 : null;
     sg.avgAvail = avails.length? Math.round(avails.reduce(function(a,b){return a+b;},0)/avails.length*10)/10 : null;
@@ -535,26 +535,28 @@ function renderHealth(){
 
   // Sort series by avgMtbf asc (worst first)
   const seriesArr = Object.values(seriesMap).sort(function(a,b){
-    if(a.avgMtbf===null) return 1;
-    if(b.avgMtbf===null) return -1;
+    if(a.avgMtbf==null||isNaN(a.avgMtbf)) return 1;
+    if(b.avgMtbf==null||isNaN(b.avgMtbf)) return -1;
     return a.avgMtbf - b.avgMtbf;
   });
 
   let html = '';
+  const snMap = DATA.series_names || {};
   seriesArr.forEach(function(sg, si){
     const mb  = sg.avgMtbf;
-    const col = mb===null ? '#9aa8b8' : mb>=100 ? '#2563c9' : mb>=50 ? '#f0a020' : '#d64541';
-    const cls = mb===null ? '' : mb<50 ? ' low' : mb<100 ? ' mid' : '';
+    const col = mb==null||isNaN(mb) ? '#9aa8b8' : mb>=100 ? '#2563c9' : mb>=50 ? '#f0a020' : '#d64541';
+    const cls = mb==null||isNaN(mb) ? '' : mb<50 ? ' low' : mb<100 ? ' mid' : '';
+    const seriesName = snMap[sg.series] || sg.series;
 
     // Series header card (always full-width)
     html += '<div class="hc-series'+(cls?cls:'')+'" id="hcsg'+si+'">'
       +'<div class="hcsg-hdr" onclick="toggleSg('+si+')">'
       +'<span class="hcsg-dot" style="background:'+col+'"></span>'
-      +'<span class="hcsg-name">'+sg.series+'</span>'
-      +'<span class="hcsg-label">'+sg.machines[0].name+'</span>'
-      +'<span class="hcsg-kpi">MTBF '+(mb!==null?mb+'h':'—')
-      +'　MTTR '+(sg.avgMttr!==null?sg.avgMttr+'h':'—')
-      +'　可用率 '+(sg.avgAvail!==null?sg.avgAvail+'%':'—')
+      +'<span class="hcsg-name">'+seriesName+'</span>'
+      +'<span class="hcsg-label">'+sg.series+'</span>'
+      +'<span class="hcsg-kpi">MTBF '+(mb!=null&&!isNaN(mb)?mb+'h':'—')
+      +'　MTTR '+(sg.avgMttr!=null&&!isNaN(sg.avgMttr)?sg.avgMttr+'h':'—')
+      +'　可用率 '+(sg.avgAvail!=null&&!isNaN(sg.avgAvail)?sg.avgAvail+'%':'—')
       +'　故障 '+sg.sumFaults+'次'
       +'</span>'
       +'<span class="hcsg-toggle" id="hcsgarrow'+si+'">▶</span>'
@@ -565,26 +567,30 @@ function renderHealth(){
 
     sg.machines.forEach(function(m, mi){
       const mb2 = m._mtbf;
-      const col2= mb2===null?'#9aa8b8':mb2>=100?'#2563c9':mb2>=50?'#f0a020':'#d64541';
-      const cls2= mb2===null?'':mb2<50?' low':mb2<100?' mid':'';
+      const mb2v = mb2!=null&&!isNaN(mb2);
+      const col2= !mb2v?'#9aa8b8':mb2>=100?'#2563c9':mb2>=50?'#f0a020':'#d64541';
+      const cls2= !mb2v?'':mb2<50?' low':mb2<100?' mid':'';
       const id  = 'hcm'+si+'_'+mi;
+      const shortCode = m.code.replace(sg.series+'-','');
 
       const monthRows = m.monthly.map(function(mo){
-        const c3=mo.mtbf>=100?'#2563c9':mo.mtbf>=50?'#f0a020':'#d64541';
+        const mv=mo.mtbf!=null&&!isNaN(mo.mtbf);
+        const c3=!mv?'#9aa8b8':mo.mtbf>=100?'#2563c9':mo.mtbf>=50?'#f0a020':'#d64541';
         return '<tr><td>'+mo.m+'</td>'
-          +'<td style="color:'+c3+';font-weight:600">'+mo.mtbf+'h</td>'
-          +'<td>'+mo.mttr+'h</td>'
-          +'<td>'+mo.avail+'%</td>'
-          +'<td>'+mo.faults+'</td>'
-          +'<td>'+mo.downtime+'h</td></tr>';
+          +'<td style="color:'+c3+';font-weight:600">'+(mv?mo.mtbf+'h':'—')+'</td>'
+          +'<td>'+(mo.mttr!=null&&!isNaN(mo.mttr)?mo.mttr+'h':'—')+'</td>'
+          +'<td>'+(mo.avail!=null&&!isNaN(mo.avail)?mo.avail+'%':'—')+'</td>'
+          +'<td>'+(mo.faults!=null?mo.faults:'—')+'</td>'
+          +'<td>'+(mo.downtime!=null&&!isNaN(mo.downtime)?mo.downtime+'h':'—')+'</td></tr>';
       }).join('');
 
       html += '<div class="hc'+cls2+'" id="'+id+'" onclick="toggleMc(\''+id+'\')">'
         +'<div class="top"><i style="background:'+col2+'"></i>'
-        +m.code.replace(sg.series+'-','')+'</div>'
-        +'<div class="big" style="color:'+col2+'">'+(mb2!==null?mb2+'h':'—')+'</div>'
-        +'<div class="meta">MTTR '+(m._mttr!=null?m._mttr+'h':'—')
-        +'　可用率 '+(m._avail!=null?m._avail+'%':'—')+'</div>'
+        +'<span style="font-size:12px;font-weight:600">'+shortCode+'</span></div>'
+        +'<div style="font-size:11.5px;color:var(--muted);margin-bottom:2px;line-height:1.3">'+m.name+'</div>'
+        +'<div class="big" style="color:'+col2+'">'+(mb2v?mb2+'h':'—')+'</div>'
+        +'<div class="meta">MTTR '+(m._mttr!=null&&!isNaN(m._mttr)?m._mttr+'h':'—')
+        +'　可用率 '+(m._avail!=null&&!isNaN(m._avail)?m._avail+'%':'—')+'</div>'
         +'<div class="meta">故障 '+(m._faults!=null?m._faults+'次':'—')+'</div>'
         +'<div class="detail" id="'+id+'d" style="display:none">'
         +'<div class="tblwrap"><table>'
