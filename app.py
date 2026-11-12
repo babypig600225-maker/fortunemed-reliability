@@ -306,6 +306,85 @@ div[data-testid="metric-container"] [data-testid="stMetricValue"] {
     border: 1px solid var(--line) !important;
     border-radius: 12px !important;
 }
+
+/* 頂層主分頁（視覺化總覽 / 詳細分析）：加大字體、加底線 */
+[data-testid="stTabs"]:first-of-type > div > [role="tablist"] > [role="tab"] {
+    font-size: 15px !important;
+    font-weight: 500 !important;
+    padding: 10px 20px !important;
+}
+[data-testid="stTabs"]:first-of-type > div > [role="tablist"] > [role="tab"][aria-selected="true"] {
+    font-size: 15px !important;
+    font-weight: 700 !important;
+}
+
+/* dataframe：去除雜亂背景，表頭與 HTML 一致 */
+[data-testid="stDataFrame"] > div {
+    border-radius: 10px !important;
+    border: 1px solid var(--line) !important;
+    overflow: hidden;
+}
+[data-testid="stDataFrame"] th {
+    background: var(--soft) !important;
+    color: var(--muted) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    padding: 8px 10px !important;
+}
+[data-testid="stDataFrame"] td {
+    font-size: 13px !important;
+    padding: 7px 10px !important;
+    color: var(--fg) !important;
+}
+
+/* selectbox / multiselect 控件：白底圓角邊框 */
+[data-testid="stSelectbox"] > div > div,
+[data-testid="stMultiSelect"] > div > div {
+    background: var(--card) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 8px !important;
+    font-size: 13px !important;
+}
+
+/* checkbox label */
+[data-testid="stCheckbox"] span {
+    font-size: 13px !important;
+    color: var(--fg) !important;
+}
+
+/* button（重設篩選等） */
+[data-testid="stButton"] > button {
+    background: var(--card) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 8px !important;
+    color: var(--fg) !important;
+    font-size: 13px !important;
+    font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif !important;
+}
+[data-testid="stButton"] > button:hover {
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+}
+
+/* caption / 小字 */
+[data-testid="stCaptionContainer"] p {
+    font-size: 13px !important;
+    color: var(--muted) !important;
+}
+
+/* divider */
+hr {
+    border-color: var(--line) !important;
+    margin: 12px 0 !important;
+}
+
+/* plotly chart 容器圓角 */
+[data-testid="stPlotlyChart"] > div {
+    border-radius: 12px !important;
+    border: 1px solid var(--line) !important;
+    overflow: hidden;
+    background: var(--card) !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
