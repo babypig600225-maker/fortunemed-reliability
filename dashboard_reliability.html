@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root {
+  --bg:#f7f7f5;--card:#ffffff;--fg:#1d2530;--muted:#6b7684;--line:#e4e6ea;--soft:#f1f3f6;
+  --accent:#2563c9;--accent-soft:#e8f0fc;--cap:#9aa8b8;
+  --c-low:#d64541;--c-mid:#f0a020;--c-ok:#2e9d57;--c-full:#2563c9;
+  --up:#2e9d57;--down:#d64541;
+}
+body.dark{
+  --bg:#12161b;--card:#1a2028;--fg:#e5e9ee;--muted:#93a0ae;--line:#2a323c;--soft:#222a33;
+  --accent:#5b9bf0;--accent-soft:#1d2b3d;
+  --c-low:#ef6b66;--c-mid:#f4b545;--c-ok:#4fc27b;--c-full:#5b9bf0;
+  --up:#4fc27b;--down:#ef6b66;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"Noto Sans TC","Microsoft JhengHei","PingFang TC",system-ui,sans-serif;font-size:14px;line-height:1.55;}
+.wrap{max-width:1180px;margin:0 auto;padding:18px 18px 48px;display:flex;flex-direction:column;gap:14px;}
+h1{margin:0;font-size:1.5rem;font-weight:700;}
+.sub{color:var(--muted);font-size:13px;}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+button{font:inherit;cursor:pointer;}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:8px;padding:6px 14px;font-size:13px;}
+.tabs{display:flex;flex-wrap:wrap;gap:2px 6px;border-bottom:1px solid var(--line);}
+.tabs button{border:0;background:none;color:var(--muted);padding:9px 14px;border-bottom:2px solid transparent;font-size:14px;}
+.tabs button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600;}
+.focus{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;}
+.focus .bar{display:flex;align-items:center;gap:10px;}
+.focus .lab{font-size:13px;color:var(--muted);white-space:nowrap;}
+.months{display:flex;flex-wrap:wrap;gap:4px;}
+.months button{border:1px solid var(--line);border-radius:20px;background:var(--card);color:var(--fg);padding:4px 14px;font-size:13px;}
+.months button.on{background:var(--accent);color:#fff;font-weight:600;border-color:var(--accent);}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;}
+.kpi .k{font-size:13px;color:var(--muted);}
+.kpi .v{font-size:1.85rem;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25;}
+.kpi .d{font-size:12.5px;font-variant-numeric:tabular-nums;margin-top:2px;}
+.up{color:var(--up);}.down{color:var(--down);}.flat{color:var(--muted);}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;}
+.panel h2{margin:0 0 2px;font-size:15.5px;font-weight:600;}
+.panel .hint{font-size:12.5px;color:var(--muted);margin:0 0 12px;}
+.summary p{margin:6px 0 10px;line-height:1.7;}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px 24px;}
+.rank h3{font-size:13px;color:var(--muted);font-weight:500;margin:8px 0 4px;}
+.rank ol{list-style:none;margin:0;padding:0;}
+.rank li{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;}
+.rank .no{width:20px;height:20px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex:none;}
+.rank .nm{flex:1;min-width:0;}.rank .nm small{color:var(--muted);margin-left:6px;font-size:12px;}
+.rank .val{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.empty{color:var(--muted);font-size:13px;padding:6px 0;}
+svg text{font-family:inherit;}
+.chartbox{position:relative;overflow:hidden;}
+.tip{position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.14);white-space:nowrap;font-variant-numeric:tabular-nums;display:none;}
+.foot{font-size:12px;color:var(--muted);margin-top:8px;}
+.health{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;}
+.hc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;text-align:left;color:var(--fg);}
+.hc.low{border-color:var(--c-low);border-width:2px;}
+.hc.mid{border-color:var(--c-mid);border-width:2px;}
+.hc.open{grid-column:1/-1;cursor:default;}
+.hc .top{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;}
+.hc .top i{width:10px;height:10px;border-radius:50%;flex:none;}
+.hc .big{font-size:1.6rem;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px;}
+.hc .meta{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;margin-top:2px;}
+.hc .detail{margin-top:10px;border-top:1px solid var(--line);padding-top:10px;}
+.hc table{border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;width:100%;}
+.hc th,.hc td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;}
+.hc th:first-child,.hc td:first-child{text-align:left;}
+.hc .tblwrap{overflow-x:auto;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div>
+    <h1>🔧 設備可靠性分析儀表板</h1>
+    <div class="sub" id="hdr-sub">富強醫材股份有限公司 設備課</div>
+  </div>
+
+  <div class="row">
+    <button class="btn" id="darkBtn">切換深色模式</button>
+  </div>
+
+  <nav class="tabs" id="tabs"></nav>
+
+  <div class="focus">
+    <div class="bar">
+      <span class="lab">月份焦點</span>
+      <div class="months" id="months"></div>
+    </div>
+    <div class="sub" id="scopeNote"></div>
+  </div>
+
+  <div class="cards" id="kpis"></div>
+
+  <section class="panel summary" id="summary"></section>
+
+  <section class="panel">
+    <h2 id="trendTitle">可用率月趨勢</h2>
+    <div class="hint">實線為平均可用率（%），虛線為目標基準 85%。</div>
+    <div class="chartbox" id="trend"></div>
+    <div class="tip" id="trendTip"></div>
+  </section>
+
+  <section class="panel">
+    <h2 id="barsTitle">各機台可用率</h2>
+    <div class="hint">依可用率由低到高排列；橫條長度＝可用率（%），紅＜80%、橘 80–94%、綠≥95%。</div>
+    <div class="chartbox" id="bars"></div>
+  </section>
+
+  <section class="panel">
+    <h2>機台健康狀態</h2>
+    <div class="hint">依可用率由低到高排序；紅框＜80%、橘框 80–94%、無框≥95%。點卡片展開每月明細。</div>
+    <div class="health" id="health"></div>
+  </section>
+
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+if(!DATA){document.body.innerHTML='<div style="padding:40px;text-align:center;color:#888">尚無資料</div>';}
+
+let curType = '全部';
+let curMonth = '';
+
+function init(){
+  // Set latest month as default
+  if(DATA.months && DATA.months.length){
+    curMonth = DATA.months[DATA.months.length-1];
+  }
+  document.getElementById('hdr-sub').textContent =
+    '富強醫材股份有限公司 設備課｜資料更新：' + (DATA.updated||'—');
+  buildTabs();
+  buildMonths();
+  render();
+
+  document.getElementById('darkBtn').onclick = function(){
+    document.body.classList.toggle('dark');
+    render();
+  };
+}
+
+function buildTabs(){
+  const el = document.getElementById('tabs');
+  el.innerHTML = '';
+  (DATA.types||['全部']).forEach(function(t){
+    const b = document.createElement('button');
+    b.textContent = t;
+    if(t===curType) b.className='on';
+    b.onclick = function(){
+      curType = t;
+      el.querySelectorAll('button').forEach(function(x){x.className='';});
+      b.className='on';
+      render();
+    };
+    el.appendChild(b);
+  });
+}
+
+function buildMonths(){
+  const el = document.getElementById('months');
+  el.innerHTML = '';
+  const months = ['全年'].concat(DATA.months||[]);
+  months.forEach(function(m){
+    const b = document.createElement('button');
+    b.textContent = m;
+    if((m==='全年' && !curMonth) || m===curMonth) b.className='on';
+    b.onclick = function(){
+      curMonth = (m==='全年') ? '' : m;
+      el.querySelectorAll('button').forEach(function(x){x.className='';});
+      b.className='on';
+      render();
+    };
+    el.appendChild(b);
+  });
+}
+
+function getKpi(){
+  const kpis = DATA.kpis || {};
+  const tk = kpis[curType] || {};
+  const mk = curMonth ? (tk[curMonth]||null) : (tk['全年']||null);
+  return mk;
+}
+
+function getPrevKpi(){
+  if(!curMonth) return null;
+  const months = DATA.months || [];
+  const idx = months.indexOf(curMonth);
+  if(idx <= 0) return null;
+  const prev = months[idx-1];
+  const kpis = DATA.kpis || {};
+  const tk = kpis[curType] || {};
+  return tk[prev] || null;
+}
+
+function render(){
+  renderScope();
+  renderKpis();
+  renderSummary();
+  renderTrend();
+  renderBars();
+  renderHealth();
+}
+
+function renderScope(){
+  const months = DATA.months||[];
+  const range = months.length ? months[0]+' – '+months[months.length-1] : '';
+  const typeLabel = curType==='全部' ? '全部機型' : curType;
+  const monthLabel = curMonth || '全年';
+  document.getElementById('scopeNote').textContent =
+    '目前顯示 — '+typeLabel+'　'+monthLabel;
+  document.getElementById('trendTitle').textContent = typeLabel+'　可用率月趨勢';
+  document.getElementById('barsTitle').textContent = (curMonth||'全年')+'　各機台可用率';
+  document.getElementById('foot').textContent = '資料範圍：2026年 '+range+'　｜　設備可靠性分析儀表板';
+}
+
+function renderKpis(){
+  const kd = getKpi() || {};
+  const prev = getPrevKpi() || {};
+
+  function delta(key, unit, invert){
+    if(!kd[key] || !prev[key]) return '';
+    const d = +(kd[key]-prev[key]).toFixed(1);
+    if(d===0) return '<span class="flat">— 持平</span>';
+    const cls = (invert ? d>0 : d<0) ? 'down' : 'up';
+    const sign = d>0 ? '↑' : '↓';
+    return '<span class="'+cls+'">'+sign+' '+Math.abs(d)+unit+'</span>';
+  }
+
+  const cards = [
+    { k:'平均可用率', v: kd.avail!=null ? kd.avail+'%' : '—',
+      d: delta('avail','%',true) + (kd.low_avail ? ' <span class="down">'+kd.low_avail+' 台未達標</span>' : '') },
+    { k:'平均 MTBF', v: kd.mtbf!=null ? kd.mtbf+' h' : '—',
+      d: delta('mtbf','h',false)+' <span class="flat">(目標≥100h)</span>' },
+    { k:'平均 MTTR', v: kd.mttr!=null ? kd.mttr+' h' : '—',
+      d: delta('mttr','h',true)+' <span class="flat">(目標≤8h)</span>' },
+    { k:'總停工時數', v: kd.downtime!=null ? kd.downtime+' h' : '—',
+      d: kd.machines ? kd.machines+' 台機台' : '' },
+    { k:'故障次數', v: kd.faults!=null ? kd.faults+' 次' : '—',
+      d: delta('faults','次',true) },
+  ];
+
+  document.getElementById('kpis').innerHTML = cards.map(function(c){
+    return '<div class="card kpi"><div class="k">'+c.k+'</div>'
+      +'<div class="v">'+c.v+'</div>'
+      +'<div class="d">'+c.d+'</div></div>';
+  }).join('');
+}
+
+function renderSummary(){
+  const kd = getKpi() || {};
+  const prev = getPrevKpi() || {};
+  const monthLabel = curMonth || '全年';
+  const typeLabel = curType==='全部' ? '全部機型' : curType;
+
+  let txt = '';
+  if(kd.avail!=null){
+    txt += monthLabel+'「'+typeLabel+'」平均可用率為 <b>'+kd.avail+'%</b>';
+    if(prev.avail!=null){
+      const d = +(kd.avail-prev.avail).toFixed(1);
+      const prevMonth = DATA.months[DATA.months.indexOf(curMonth)-1] || '';
+      if(d>0) txt += '，較'+prevMonth+' <b class="up">上升 '+d+' 個百分點</b>';
+      else if(d<0) txt += '，較'+prevMonth+' <b class="down">下降 '+Math.abs(d)+' 個百分點</b>';
+      else txt += '，與前月持平';
+    }
+    txt += '。';
+  }
+  if(kd.faults!=null) txt += '共發生故障 <b>'+kd.faults+' 次</b>，總停工時數 <b>'+kd.downtime+' h</b>。';
+  if(kd.machines!=null) txt += '涉及 <b>'+kd.machines+' 台</b>機台。';
+  if(kd.low_avail) txt += ' 其中 <b class="down">'+kd.low_avail+' 台</b>可用率未達目標 85%，請優先關注。';
+
+  document.getElementById('summary').innerHTML =
+    '<h2>'+monthLabel+'「'+typeLabel+'」可靠性摘要</h2>'
+    +'<p>'+txt+'</p>'
+    +'<div class="two" id="ranks"></div>';
+  renderRanks();
+}
+
+function renderRanks(){
+  const machines = getMachines();
+  const latestMonth = curMonth || (DATA.months && DATA.months[DATA.months.length-1]) || '';
+
+  // For selected month, get machines that have data
+  let list = machines.map(function(m){
+    if(!curMonth){
+      return {code:m.code, name:m.name, avail:m.avail, downtime:m.downtime, faults:m.faults};
+    }
+    const mo = m.monthly.find(function(x){return x.m===curMonth;});
+    if(!mo) return null;
+    return {code:m.code, name:m.name, avail:mo.avail, downtime:mo.downtime, faults:mo.faults};
+  }).filter(Boolean);
+
+  list.sort(function(a,b){return a.avail-b.avail;});
+  const low3 = list.slice(0,3);
+  list.sort(function(a,b){return b.downtime-a.downtime;});
+  const top3dt = list.slice(0,3);
+
+  function rankHTML(title, arr, valKey, unit, cls){
+    if(!arr.length) return '<div class="rank"><h3>'+title+'</h3><div class="empty">無資料</div></div>';
+    return '<div class="rank"><h3>'+title+'</h3><ol>'
+      +arr.map(function(item,i){
+        return '<li><span class="no">'+(i+1)+'</span>'
+          +'<span class="nm">'+item.code+'<small>'+item.name+'</small></span>'
+          +'<span class="val '+(cls||'')+'">'+item[valKey]+unit+'</span></li>';
+      }).join('')+'</ol></div>';
+  }
+
+  document.getElementById('ranks').innerHTML =
+    rankHTML('可用率最低 Top 3（需關注）', low3, 'avail', '%', 'down')
+    + rankHTML('停工時數最多 Top 3', top3dt, 'downtime', ' h', '');
+}
+
+function getTrend(){
+  const trend = DATA.trend || {};
+  return trend[curType] || [];
+}
+
+function getMachines(){
+  const all = DATA.machines || [];
+  if(curType==='全部') return all;
+  return all.filter(function(m){return m.type===curType;});
+}
+
+// ── Trend Chart ──────────────────────────────────────────────────────
+function renderTrend(){
+  const trend = getTrend();
+  const el = document.getElementById('trend');
+  if(!trend.length){ el.innerHTML='<div class="empty" style="padding:20px 0">無趨勢資料</div>'; return; }
+
+  const W=el.offsetWidth||800, H=200;
+  const pad={t:30,b:40,l:52,r:20};
+  const cw=W-pad.l-pad.r, ch=H-pad.t-pad.b;
+
+  const vals = trend.map(function(d){return d.avail;});
+  const yMin=0, yMax=110;
+
+  function xp(i){ return pad.l + i/(trend.length-1||1)*cw; }
+  function yp(v){ return pad.t + (1-(v-yMin)/(yMax-yMin))*ch; }
+
+  const isDark = document.body.classList.contains('dark');
+  const lineC = isDark ? '#5b9bf0' : '#2563c9';
+  const refC  = isDark ? '#555' : '#ccc';
+  const gridC = isDark ? '#2a323c' : '#eee';
+  const fgC   = isDark ? '#93a0ae' : '#6b7684';
+
+  let paths = '';
+  // Grid lines
+  [0,25,50,75,85,100].forEach(function(v){
+    const y = yp(v);
+    const dash = v===85 ? '4,3' : '';
+    const col  = v===85 ? '#f0a020' : gridC;
+    paths += '<line x1="'+pad.l+'" y1="'+y+'" x2="'+(pad.l+cw)+'" y2="'+y+'"'
+      +' stroke="'+col+'" stroke-width="'+(v===85?1.5:1)+'" stroke-dasharray="'+dash+'"/>';
+    paths += '<text x="'+(pad.l-6)+'" y="'+(y+4)+'" text-anchor="end" font-size="11" fill="'+fgC+'">'+v+'%</text>';
+    if(v===85) paths += '<text x="'+(pad.l+cw+4)+'" y="'+(y+4)+'" font-size="10" fill="#f0a020">目標</text>';
+  });
+
+  // Line path
+  let d=''; trend.forEach(function(pt,i){ d+=(i===0?'M':'L')+xp(i)+','+yp(pt.avail); });
+  paths += '<path d="'+d+'" fill="none" stroke="'+lineC+'" stroke-width="2.5" stroke-linejoin="round"/>';
+
+  // Points + labels
+  trend.forEach(function(pt,i){
+    const x=xp(i), y=yp(pt.avail);
+    const col = pt.avail>=95?lineC : pt.avail>=80?'#f0a020':'#d64541';
+    const isCur = pt.m===curMonth;
+    paths += '<circle cx="'+x+'" cy="'+y+'" r="'+(isCur?6:4)+'" fill="'+col+'"'
+      +' stroke="'+(isDark?'#1a2028':'#fff')+'" stroke-width="2"/>';
+    paths += '<text x="'+x+'" y="'+(y-11)+'" text-anchor="middle" font-size="11" font-weight="'+(isCur?700:400)+'" fill="'+col+'">'+pt.avail+'%</text>';
+  });
+
+  // X labels
+  trend.forEach(function(pt,i){
+    const x=xp(i);
+    const isCur = pt.m===curMonth;
+    paths += '<text x="'+x+'" y="'+(H-6)+'" text-anchor="middle" font-size="12" font-weight="'+(isCur?700:400)+'" fill="'+(isCur?lineC:fgC)+'">'+pt.m+'</text>';
+  });
+
+  el.innerHTML = '<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+paths+'</svg>';
+}
+
+// ── Bar Chart ─────────────────────────────────────────────────────────
+function renderBars(){
+  const machines = getMachines();
+  const el = document.getElementById('bars');
+
+  let list = machines.map(function(m){
+    if(curMonth){
+      const mo = m.monthly.find(function(x){return x.m===curMonth;});
+      if(!mo) return null;
+      return {code:m.code, name:m.name, avail:mo.avail, faults:mo.faults, downtime:mo.downtime};
+    }
+    return {code:m.code, name:m.name, avail:m.avail, faults:m.faults, downtime:m.downtime};
+  }).filter(Boolean);
+
+  if(!list.length){ el.innerHTML='<div class="empty" style="padding:20px 0">無資料</div>'; return; }
+  list.sort(function(a,b){return a.avail-b.avail;});
+
+  const ROW=28, PAD_L=180, PAD_R=60, PAD_V=12;
+  const W=el.offsetWidth||800;
+  const barW=W-PAD_L-PAD_R;
+  const H=list.length*ROW+PAD_V*2;
+
+  const isDark=document.body.classList.contains('dark');
+  const fgC=isDark?'#93a0ae':'#6b7684';
+  const fg2=isDark?'#e5e9ee':'#1d2530';
+  const gridC=isDark?'#2a323c':'#eee';
+
+  let svg='';
+  // Grid lines
+  [0,25,50,75,85,100].forEach(function(v){
+    const x=PAD_L+v/100*barW;
+    svg+='<line x1="'+x+'" y1="'+PAD_V+'" x2="'+x+'" y2="'+(H-PAD_V)+'"'
+      +' stroke="'+(v===85?'#f0a020':gridC)+'" stroke-width="'+(v===85?1.5:1)+'"'
+      +' stroke-dasharray="'+(v===85?'4,3':'')+'" />';
+    if(v!==0 && v!==100)
+      svg+='<text x="'+x+'" y="'+(PAD_V-4)+'" text-anchor="middle" font-size="10" fill="'+fgC+'">'+v+'%</text>';
+  });
+
+  list.forEach(function(item,i){
+    const y=PAD_V+i*ROW;
+    const bh=ROW*0.55, by=y+(ROW-bh)/2;
+    const bw=Math.max(item.avail/100*barW,2);
+    const col=item.avail>=95?'#2563c9':item.avail>=80?'#f0a020':'#d64541';
+
+    // Label (machine code + name)
+    const label=(item.code||'').replace('M-','').replace(/-\d+$/,'');
+    svg+='<text x="'+(PAD_L-8)+'" y="'+(y+ROW/2+4)+'" text-anchor="end" font-size="12" fill="'+fg2+'">'+label+'</text>';
+    svg+='<text x="'+(PAD_L-8)+'" y="'+(y+ROW/2+16)+'" text-anchor="end" font-size="10" fill="'+fgC+'">'+item.name+'</text>';
+
+    // Bar
+    svg+='<rect x="'+PAD_L+'" y="'+by+'" width="'+bw+'" height="'+bh+'" rx="3" fill="'+col+'" opacity="0.85"/>';
+    // Value label
+    if(bw>24)
+      svg+='<text x="'+(PAD_L+bw+4)+'" y="'+(by+bh/2+4)+'" font-size="11" font-weight="600" fill="'+col+'">'+item.avail+'%</text>';
+    else
+      svg+='<text x="'+(PAD_L+bw+4)+'" y="'+(by+bh/2+4)+'" font-size="11" font-weight="600" fill="'+col+'">'+item.avail+'%</text>';
+  });
+
+  el.innerHTML='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'" style="display:block">'+svg+'</svg>';
+}
+
+// ── Health Cards ──────────────────────────────────────────────────────
+function renderHealth(){
+  const machines = getMachines();
+  const el = document.getElementById('health');
+
+  let list = machines.map(function(m){
+    if(curMonth){
+      const mo = m.monthly.find(function(x){return x.m===curMonth;});
+      if(!mo) return Object.assign({},m,{_avail:null});
+      return Object.assign({},m,{_avail:mo.avail,_mtbf:mo.mtbf,_mttr:mo.mttr,_faults:mo.faults,_downtime:mo.downtime,_mo:mo});
+    }
+    return Object.assign({},m,{_avail:m.avail,_mtbf:m.mtbf,_mttr:m.mttr,_faults:m.faults,_downtime:m.downtime});
+  });
+
+  // Sort: low avail first, then null
+  list.sort(function(a,b){
+    if(a._avail===null && b._avail===null) return 0;
+    if(a._avail===null) return 1;
+    if(b._avail===null) return -1;
+    return a._avail-b._avail;
+  });
+
+  el.innerHTML = list.map(function(m,idx){
+    const av = m._avail;
+    const col = av===null ? '#9aa8b8' : av>=95 ? '#2563c9' : av>=80 ? '#f0a020' : '#d64541';
+    const cls = av===null ? '' : av<80 ? ' low' : av<95 ? ' mid' : '';
+    const bigVal = av!==null ? av+'%' : '—';
+
+    const monthRows = m.monthly.map(function(mo){
+      const c2=mo.avail>=95?'#2563c9':mo.avail>=80?'#f0a020':'#d64541';
+      return '<tr><td>'+mo.m+'</td><td style="color:'+c2+';font-weight:600">'+mo.avail+'%</td>'
+        +'<td>'+mo.mtbf+'h</td><td>'+mo.mttr+'h</td><td>'+mo.faults+'</td><td>'+mo.downtime+'h</td></tr>';
+    }).join('');
+
+    return '<div class="hc'+cls+'" id="hc'+idx+'" onclick="toggleHc('+idx+')">'
+      +'<div class="top"><i style="background:'+col+'"></i>'+m.code+'</div>'
+      +'<div class="big" style="color:'+col+'">'+bigVal+'</div>'
+      +'<div class="meta">'+(m.name||'')+'</div>'
+      +'<div class="meta">MTBF '+(m._mtbf!=null?m._mtbf+'h':'—')
+      +'　MTTR '+(m._mttr!=null?m._mttr+'h':'—')
+      +'　故障 '+(m._faults!=null?m._faults+'次':'—')+'</div>'
+      +'<div class="detail" id="hcd'+idx+'" style="display:none">'
+      +'<div class="tblwrap"><table><tr><th>月份</th><th>可用率</th><th>MTBF</th><th>MTTR</th><th>故障</th><th>停工</th></tr>'
+      +monthRows+'</table></div></div>'
+      +'</div>';
+  }).join('');
+}
+
+function toggleHc(idx){
+  const card = document.getElementById('hc'+idx);
+  const detail = document.getElementById('hcd'+idx);
+  if(!detail) return;
+  const open = detail.style.display!=='none';
+  detail.style.display = open ? 'none' : 'block';
+  if(!open){ card.classList.add('open'); }
+  else { card.classList.remove('open'); }
+}
+
+// Redraw on resize
+let resizeTimer;
+window.addEventListener('resize', function(){
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(function(){ renderTrend(); renderBars(); }, 150);
+});
+
+if(DATA) init();
+</script>
+</body>
+</html>

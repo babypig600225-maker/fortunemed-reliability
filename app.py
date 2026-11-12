@@ -3,10 +3,11 @@
 Repo: fortunemed-reliability
 """
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-import re, json, base64, requests, io
+import re, json, base64, requests, io, os
 from datetime import datetime, date
 
 # ── 常數 ─────────────────────────────────────────────────────────────
@@ -502,6 +503,138 @@ def monthly_summary_by_type(df_kpi, hours_base, special_off):
             })
     return pd.DataFrame(rows)
 
+def build_dashboard_json(df_kpi, hours_base, special_off, updated=""):
+    """Build JSON payload for dashboard_reliability.html template."""
+    months_sorted = sorted(df_kpi["月份"].unique(),
+                           key=lambda x: MONTH_ORDER.index(x) if x in MONTH_ORDER else 99)
+    short_months = [m.replace("2026-","") for m in months_sorted]
+
+    types_all = ["全部"] + EQ_TYPE_ORDER
+
+    def kpi_for(subset, month_key):
+        if month_key == "全年":
+            df = subset
+            # For overall KPIs, average across all months per machine, then mean
+            if df.empty:
+                return {}
+            m_avail = round(df["可用率(%)"].mean(), 1)
+            m_mtbf  = round(df["MTBF(h)"].mean(), 1)
+            m_mttr  = round(df["MTTR(h)"].mean(), 1)
+            m_down  = round(df["停工時數(h)"].sum(), 1)
+            m_faults= int(df["故障次數"].sum())
+            m_mach  = df["機台代碼"].nunique()
+            m_low   = int((df.groupby("機台代碼")["可用率(%)"].mean() < THRESHOLD_AVAIL).sum())
+        else:
+            full_key = "2026-" + month_key
+            df = subset[subset["月份"] == full_key]
+            if df.empty:
+                return {}
+            m_avail = round(df["可用率(%)"].mean(), 1)
+            m_mtbf  = round(df["MTBF(h)"].mean(), 1)
+            m_mttr  = round(df["MTTR(h)"].mean(), 1)
+            m_down  = round(df["停工時數(h)"].sum(), 1)
+            m_faults= int(df["故障次數"].sum())
+            m_mach  = df["機台代碼"].nunique()
+            m_low   = int((df["可用率(%)"] < THRESHOLD_AVAIL).sum())
+        return {
+            "avail": m_avail, "mtbf": m_mtbf, "mttr": m_mttr,
+            "downtime": m_down, "faults": m_faults,
+            "machines": m_mach, "low_avail": m_low,
+        }
+
+    kpis = {}
+    for t in types_all:
+        sub = df_kpi if t == "全部" else df_kpi[df_kpi["設備類型"] == t]
+        kpis[t] = {}
+        kpis[t]["全年"] = kpi_for(sub, "全年")
+        for sm in short_months:
+            kd = kpi_for(sub, sm)
+            if kd:
+                kpis[t][sm] = kd
+
+    # Trend: per type, per month
+    trend = {}
+    for t in types_all:
+        sub = df_kpi if t == "全部" else df_kpi[df_kpi["設備類型"] == t]
+        rows = []
+        for i, sm in enumerate(short_months):
+            full_key = "2026-" + sm
+            df_m = sub[sub["月份"] == full_key]
+            if df_m.empty:
+                continue
+            rows.append({
+                "m": sm,
+                "avail":    round(df_m["可用率(%)"].mean(), 1),
+                "mtbf":     round(df_m["MTBF(h)"].mean(), 1),
+                "mttr":     round(df_m["MTTR(h)"].mean(), 1),
+                "downtime": round(df_m["停工時數(h)"].sum(), 1),
+                "faults":   int(df_m["故障次數"].sum()),
+            })
+        trend[t] = rows
+
+    # Machines: aggregate across all months + monthly breakdown
+    machines = []
+    for code, grp in df_kpi.groupby("機台代碼"):
+        if not code:
+            continue
+        name = grp["機台名稱"].iloc[0]
+        eq_type = grp["設備類型"].iloc[0]
+        series  = grp["系列"].iloc[0]
+        overall_avail = round(grp["可用率(%)"].mean(), 1)
+        overall_mtbf  = round(grp["MTBF(h)"].mean(), 1)
+        overall_mttr  = round(grp["MTTR(h)"].mean(), 1)
+        overall_faults = int(grp["故障次數"].sum())
+        overall_down   = round(grp["停工時數(h)"].sum(), 1)
+
+        monthly = []
+        for sm in short_months:
+            full_key = "2026-" + sm
+            dm = grp[grp["月份"] == full_key]
+            if dm.empty:
+                continue
+            row = dm.iloc[0]
+            monthly.append({
+                "m": sm,
+                "avail":    round(row["可用率(%)"], 1),
+                "mtbf":     round(row["MTBF(h)"], 1),
+                "mttr":     round(row["MTTR(h)"], 1),
+                "faults":   int(row["故障次數"]),
+                "downtime": round(row["停工時數(h)"], 1),
+            })
+
+        machines.append({
+            "code": code, "name": name,
+            "type": eq_type, "series": series,
+            "avail": overall_avail, "mtbf": overall_mtbf,
+            "mttr": overall_mttr, "faults": overall_faults,
+            "downtime": overall_down,
+            "monthly": monthly,
+        })
+
+    return {
+        "updated": updated,
+        "months": short_months,
+        "types": types_all,
+        "kpis": kpis,
+        "trend": trend,
+        "machines": machines,
+    }
+
+
+def render_html_dashboard(data_json: dict):
+    """Load dashboard_reliability.html, inject JSON data, render via components.html()."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    tpl_path = os.path.join(here, "dashboard_reliability.html")
+    if not os.path.exists(tpl_path):
+        st.error("找不到 dashboard_reliability.html 模板，請確認檔案存在。")
+        return
+    with open(tpl_path, encoding="utf-8") as f:
+        html = f.read()
+    json_str = json.dumps(data_json, ensure_ascii=False)
+    html = html.replace("/*__DATA__*/null", json_str, 1)
+    components.html(html, height=2800, scrolling=True)
+
+
 def avail_badge(val):
     if val >= THRESHOLD_AVAIL:
         return f'<span class="badge badge-green">✓ {val}%</span>'
@@ -627,6 +760,13 @@ def main():
                           key=lambda x: MONTH_ORDER.index(x) if x in MONTH_ORDER else 99)
     df_summary = monthly_summary(df_kpi, hours_base, special_off)
     df_summary_type = monthly_summary_by_type(df_kpi, hours_base, special_off)
+
+    # ── HTML 自訂儀表板（與稼動率相同風格）──────────────────────────────
+    dash_data = build_dashboard_json(df_kpi, hours_base, special_off,
+                                     updated=stored.get("updated", ""))
+    render_html_dashboard(dash_data)
+    st.markdown("---")
+    st.markdown("#### 📋 詳細分析（篩選器 + 原始資料）")
 
     # ── 資訊列 ──
     m_range = f"{months_avail[0].replace('2026-','')} – {months_avail[-1].replace('2026-','')}" if months_avail else ""
