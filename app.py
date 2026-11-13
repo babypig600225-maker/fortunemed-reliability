@@ -11,6 +11,7 @@ import re, json, base64, requests, io, os, unicodedata
 from equipment import parse_equipment_excel, map_repair_code, ACTIVE_STATUS
 from monthly_report import build_month_tables, to_excel, STATUS_STYLE, STATUS_ORDER
 import html as _html
+from targets import achievement_table, summary_text
 from datetime import datetime, date
 
 # ── 常數 ─────────────────────────────────────────────────────────────
@@ -18,9 +19,10 @@ GH_REPO   = "babypig600225-maker/fortunemed-reliability"
 GH_PATH   = "data.json"
 RAW_URL   = f"https://raw.githubusercontent.com/{GH_REPO}/main/{GH_PATH}"
 API_URL   = f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH}"
-THRESHOLD_AVAIL  = 85.0
-THRESHOLD_MTBF   = 100.0
-THRESHOLD_MTTR   = 8.0
+THRESHOLD_AVAIL  = 99.0   # 系列、全廠（單台不設）
+AVAIL_WARN       = 95.0   # 可用率警示線
+THRESHOLD_MTBF   = 100.0  # 單台、系列（全廠不設：在用台數會增減）
+THRESHOLD_MTTR   = 8.0    # 單台、系列、全廠
 
 # 非故障報修單（保留紀錄，但不計入故障次數 / 維修工時 / 停工）
 ROUTINE_KEYWORDS = ["更換環氧乙烷", "鋼瓶"]
@@ -431,6 +433,12 @@ hr {
 .ma-rule { font-size: 12px; color: var(--muted); }
 .ma-sub { font-size: 12.5px; font-weight: 400; color: var(--muted); margin-left: 4px; }
 
+.sum-row { display: flex; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line);
+    font-size: 14px; line-height: 1.6; }
+.sum-row:last-child { border-bottom: 0; }
+.sum-k { flex: none; width: 72px; font-weight: 700; color: var(--accent); }
+.sum-v { color: var(--fg); }
+
 /* plotly chart 容器圓角 */
 [data-testid="stPlotlyChart"] > div {
     border-radius: 12px !important;
@@ -703,13 +711,16 @@ def pool(df):
         "avail": round(op / ah * 100, 2) if ah else None,
     }
 
-def judge(faults, mtbf, mttr):
-    """狀態判定"""
+def judge(faults, mtbf, mttr, avail=None):
+    """狀態判定（avail 只在系列層級傳入）"""
     if not faults:
         return "表現卓越"
     if mtbf is not None and mtbf < 50:
         return "需重點改善"
-    if (mtbf is not None and mtbf < THRESHOLD_MTBF) or (mttr is not None and mttr > THRESHOLD_MTTR):
+    if avail is not None and avail < AVAIL_WARN:
+        return "需重點改善"
+    if (mtbf is not None and mtbf < THRESHOLD_MTBF) or (mttr is not None and mttr > THRESHOLD_MTTR) \
+            or (avail is not None and avail < THRESHOLD_AVAIL):
         return "需改善"
     return "正常"
 
@@ -753,8 +764,8 @@ def build_dashboard_json(df_kpi, hours_base, special_off, updated=""):
         if df.empty:
             return {}
         p = pool(df)
-        per_m = df.groupby("機台代碼")[["運作時數(h)", "月可用時數(h)"]].sum()
-        low = int(((per_m["運作時數(h)"] / per_m["月可用時數(h)"] * 100) < THRESHOLD_AVAIL).sum())
+        per_s = df.groupby("系列")[["運作時數(h)", "月可用時數(h)"]].sum()
+        low = int(((per_s["運作時數(h)"] / per_s["月可用時數(h)"] * 100) < THRESHOLD_AVAIL).sum())
         return {"avail": r1(p["avail"]), "mtbf": r1(p["mtbf"]), "mttr": r1(p["mttr"]),
                 "downtime": r1(p["downtime"]), "faults": p["faults"],
                 "machines": p["n_fault"], "active": p["n"], "low_avail": low}
@@ -874,7 +885,7 @@ def render_html_dashboard(data_json: dict):
 def avail_badge(val):
     if val >= THRESHOLD_AVAIL:
         return f'<span class="badge badge-green">✓ {val}%</span>'
-    elif val >= 80:
+    elif val >= AVAIL_WARN:
         return f'<span class="badge badge-amber">△ {val}%</span>'
     return f'<span class="badge badge-red">✗ {val}%</span>'
 
@@ -913,8 +924,7 @@ def render_monthly_analysis(df_kpi, df_raw, months_avail, excluded, nonfault=Non
     k2.metric("在用／故障機台", f"{p['n']}／{p['n_fault']} 台")
     k3.metric("故障次數", f"{p['faults']} 次")
     k4.metric("MTBF（合計）", f"{p['mtbf']} h" if p["mtbf"] is not None else "無故障",
-              "✓ 達標" if (p["mtbf"] or 1e9) >= THRESHOLD_MTBF else f"目標≥{THRESHOLD_MTBF:g}h",
-              delta_color="normal" if (p["mtbf"] or 1e9) >= THRESHOLD_MTBF else "inverse")
+              "參考值（不設目標）", delta_color="off")
     k5.metric("MTTR（合計）", f"{p['mttr']} h" if p["mttr"] is not None else "—",
               "✓ 達標" if (p["mttr"] or 0) <= THRESHOLD_MTTR else f"目標≤{THRESHOLD_MTTR:g}h",
               delta_color="normal" if (p["mttr"] or 0) <= THRESHOLD_MTTR else "inverse")
@@ -926,12 +936,31 @@ def render_monthly_analysis(df_kpi, df_raw, months_avail, excluded, nonfault=Non
         '<div class="ma-legend">系列：' + "".join(f"{_status_pill(o)} {int(cnt_s.get(o,0))}　" for o in order)
         + '<br>機台：' + "".join(f"{_status_pill(o)} {int(cnt_m.get(o,0))}　" for o in order)
         + '<br><span class="ma-rule">判定：無故障＝表現卓越；MTBF＜50h＝需重點改善；'
-          f'MTBF＜{THRESHOLD_MTBF:g}h 或 MTTR＞{THRESHOLD_MTTR:g}h＝需改善；其餘＝正常</span></div>',
+          f'MTBF＜{THRESHOLD_MTBF:g}h、MTTR＞{THRESHOLD_MTTR:g}h 或系列可用率＜{THRESHOLD_AVAIL:g}%＝需改善'
+          f'（系列可用率＜{AVAIL_WARN:g}%＝需重點改善）；其餘＝正常</span></div>',
         unsafe_allow_html=True)
 
+    _tbl, _cache = achievement_table(df_kpi, months_avail, pool, TARGETS)
+    _i = months_avail.index(month)
+    _items = summary_text(month, months_avail[_i - 1] if _i > 0 else None, _cache, df_raw, SERIES_NAME, TARGETS)
+    _r = _tbl[_tbl["月份"] == month.replace("2026-", "")].iloc[0]
+    _fr = lambda t: f"{t[0]}/{t[1]}"
+    _a = _cache[month]
+    _kpi_rows = [
+        {"項目": "全廠 MTTR(h)", "實績": _r["全廠MTTR(h)"], "目標": f"≤{THRESHOLD_MTTR:g}", "判定": _r["MTTR達標"]},
+        {"項目": "全廠可用率(%)", "實績": _r["全廠可用率(%)"], "目標": f"≥{THRESHOLD_AVAIL:g}", "判定": _r["可用率達標"]},
+        {"項目": "全廠 MTBF(h)", "實績": _r["全廠MTBF(h)（參考）"], "目標": "參考值", "判定": ""},
+        {"項目": "系列 MTBF 達成", "實績": _fr(_a["ser_mtbf"]), "目標": f"≥{THRESHOLD_MTBF:g}h", "判定": ""},
+        {"項目": "系列 MTTR 達成", "實績": _fr(_a["ser_mttr"]), "目標": f"≤{THRESHOLD_MTTR:g}h", "判定": ""},
+        {"項目": "系列可用率達成", "實績": _fr(_a["ser_avail"]), "目標": f"≥{THRESHOLD_AVAIL:g}%", "判定": ""},
+        {"項目": "單台 MTBF 達成", "實績": _fr(_a["mac_mtbf"]), "目標": f"≥{THRESHOLD_MTBF:g}h", "判定": ""},
+        {"項目": "單台 MTTR 達成", "實績": _fr(_a["mac_mttr"]), "目標": f"≤{THRESHOLD_MTTR:g}h", "判定": ""},
+    ]
+    if typ != "全部":
+        _kpi_rows, _items = None, None      # 達成摘要以全廠為範圍
     st.download_button(
         "⬇ 下載本月分析 Excel",
-        data=to_excel(df_s, df_m, month),
+        data=to_excel(df_s, df_m, month, _items, _kpi_rows),
         file_name=f"設備可靠性月度分析_{month}{'' if typ=='全部' else '_'+typ}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="ma_dl")
@@ -950,7 +979,7 @@ def render_monthly_analysis(df_kpi, df_raw, months_avail, excluded, nonfault=Non
                     f'"></i>{t}　<span class="ma-sub">{len(vt)} 個系列</span></div>',
                     unsafe_allow_html=True)
         head = ["設備名稱", "設備系列", "在用／<br>故障台數", "故障<br>總次數", "總維修<br>工時(H)",
-                "總維修<br>停工時間(H)", "MTBF<br>(小時/次)", "MTTR<br>(小時/次)", "狀態判定", "分析與建議"]
+                "總維修<br>停工時間(H)", "MTBF<br>(小時/次)", "MTTR<br>(小時/次)", "可用率<br>(%)", "狀態判定", "分析與建議"]
         rows = []
         for _, r in vt.iterrows():
             red = ' class="hot"' if r["故障總次數"] >= 5 else ""
@@ -966,6 +995,7 @@ def render_monthly_analysis(df_kpi, df_raw, months_avail, excluded, nonfault=Non
                 f"<td>{_num(r['總維修停工時間(H)'])}</td>"
                 f"<td>{_num(r['MTBF(小時/次)'])}</td>"
                 f"<td>{_num(r['MTTR(小時/次)'])}</td>"
+                f"<td{' class=hot' if (r['可用率(%)'] or 100) < THRESHOLD_AVAIL else ''}>{_num(r['可用率(%)'])}</td>"
                 f"<td>{_status_pill(r['狀態判定'])}</td>"
                 f"<td class='l txt'>{_html.escape(r['分析與建議'])}{watch}</td>"
                 "</tr>")
@@ -1008,6 +1038,109 @@ def render_monthly_analysis(df_kpi, df_raw, months_avail, excluded, nonfault=Non
         with st.expander(f"未列入計算的報修單（{len(ex)} 筆：機台不在在用名冊，如停用、報廢或非 M-301/302/303）"):
             cols = [c for c in ["原始代碼", "機台名稱", "需求", "維修時數", "停機"] if c in ex.columns]
             st.dataframe(ex[cols], use_container_width=True, hide_index=True)
+
+TARGETS = {"mtbf": THRESHOLD_MTBF, "mttr": THRESHOLD_MTTR, "avail": THRESHOLD_AVAIL}
+
+def render_targets(df_kpi, df_raw, months_avail):
+    tbl, cache = achievement_table(df_kpi, months_avail, pool, TARGETS)
+
+    # ── 1. 目標設定說明 ──
+    st.markdown('<div class="section-title">目標設定方式</div>', unsafe_allow_html=True)
+    fk = df_kpi[df_kpi["故障次數"] > 0]
+    pct_mtbf = (fk["MTBF(h)"] >= THRESHOLD_MTBF).mean() * 100 if len(fk) else 0
+    pct_mttr = (fk["MTTR(h)"] <= THRESHOLD_MTTR).mean() * 100 if len(fk) else 0
+    fleet_av = tbl["全廠可用率(%)"].dropna()
+    fleet_mttr_all = pool(df_kpi)["mttr"]
+    hrs = df_kpi.groupby("月份")["月可用時數(h)"].first()
+    rng = f"{tbl['月份'].iloc[0]}–{tbl['月份'].iloc[-1]}" if len(tbl) else ""
+    rows = [
+        ("MTBF", f"≥ {THRESHOLD_MTBF:g} h", "單台、系列",
+         f"每月計畫運轉約 {hrs.min():g}–{hrs.max():g}h，≥{THRESHOLD_MTBF:g}h 約等於平均每台每月故障不超過 2 次。"
+         f"{rng} 有故障的機台月份中 {pct_mtbf:.0f}% 達成。"),
+        ("MTBF", "不設目標（參考值）", "全廠、設備類型",
+         "全廠 MTBF 會隨在用台數增減而變動（新增機台會讓 MTBF 自動變高），無法反映實際改善，故只列為參考。"
+         "全廠趨勢可看「每台平均故障次數」。"),
+        ("MTTR", f"≤ {THRESHOLD_MTTR:g} h", "單台、系列、全廠",
+         f"一個正常班（08:00–17:00）內修復。{rng} 全廠合計 MTTR 為 {fleet_mttr_all:.2f}h；"
+         f"有故障的機台月份中 {pct_mttr:.0f}% 達成。"),
+        ("可用率", f"≥ {THRESHOLD_AVAIL:g} %", "系列、全廠",
+         (f"{rng} 全廠每月可用率 {fleet_av.min():.2f}–{fleet_av.max():.2f}%。" if len(fleet_av) else "")
+         + "單台不設可用率目標，已由 MTBF、MTTR 把關。"),
+    ]
+    st.markdown(
+        '<div class="ma-wrap"><table class="ma-table"><thead><tr>'
+        '<th>指標</th><th>目標</th><th>適用層級</th><th>設定依據</th></tr></thead><tbody>'
+        + "".join(f"<tr><td><b>{a}</b></td><td>{b}</td><td>{c}</td><td class='l txt'>{_html.escape(d)}</td></tr>"
+                  for a, b, c, d in rows)
+        + "</tbody></table></div>", unsafe_allow_html=True)
+    st.markdown(
+        '<div class="ma-legend">'
+        '<b>計算方式</b><br>'
+        '・MTBF ＝（計畫運轉時間 − 停機時間）÷ 故障次數；MTTR ＝ 維修時數 ÷ 故障次數；'
+        '可用率 ＝（計畫運轉時間 − 停機時間）÷ 計畫運轉時間<br>'
+        '・計畫運轉時間 ＝ 上班日 × 11h；停機時間只計「是否停機＝YES」的報修單，以 08:00–20:00 上班時段計算<br>'
+        '・每張報修單算 1 次故障；例行更換耗材、新機/改機測試、製程調整不計入<br>'
+        '・系列與全廠為合計值：先加總各台時間與次數再相除，無故障的在用機台也計入<br>'
+        '・只計 M-301／302／303 中使用中、測試中、驗證中的機台<br>'
+        f'<b>狀態判定</b>：無故障＝表現卓越；MTBF＜50h 或系列可用率＜{AVAIL_WARN:g}%＝需重點改善；'
+        f'MTBF＜{THRESHOLD_MTBF:g}h、MTTR＞{THRESHOLD_MTTR:g}h 或系列可用率＜{THRESHOLD_AVAIL:g}%＝需改善；其餘＝正常<br>'
+        '<b>檢討</b>：2026 年為基準年，建議每季檢討一次，2027 年起依實績調整目標。</div>',
+        unsafe_allow_html=True)
+
+    # ── 2. 每月達成情形 ──
+    st.markdown('<div class="section-title">每月達成情形</div>', unsafe_allow_html=True)
+    st.caption("達成數＝達標單位數／在用單位數；當月無故障的機台或系列，MTBF、MTTR 視為達標。")
+    show = tbl[[c for c in tbl.columns if not c.startswith("_")]]
+
+    def _mk(v):
+        return ("color:#1f7a4d;font-weight:700" if v == "✓"
+                else "color:#a32d2d;font-weight:700" if v == "✗" else "")
+    st.dataframe(
+        show.style.map(_mk, subset=["MTTR達標", "可用率達標"])
+            .format({"全廠MTTR(h)": "{:.2f}", "全廠可用率(%)": "{:.2f}",
+                     "全廠MTBF(h)（參考）": "{:.1f}", "每台平均故障次數（參考）": "{:.3f}"},
+                    na_rep="—"),
+        use_container_width=True, hide_index=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        fig = go.Figure()
+        for col, name, color in [("_ser_mtbf", "系列 MTBF", "#2563c9"), ("_ser_mttr", "系列 MTTR", "#f0a020"),
+                                 ("_ser_avail", "系列可用率", "#2e9d57"),
+                                 ("_mac_mtbf", "單台 MTBF", "#7f9fd6"), ("_mac_mttr", "單台 MTTR", "#e7b866")]:
+            fig.add_scatter(x=tbl["月份"], y=tbl[col], name=name, mode="lines+markers",
+                            line=dict(color=color, width=2, dash="dot" if col.startswith("_mac") else "solid"))
+        fig.update_layout(**PLOT_LAYOUT, height=320,
+                          title=dict(text="目標達成率（%）", font_size=14, x=0),
+                          yaxis=dict(range=[min(80, (tbl[[c for c in tbl.columns if c.startswith("_")]].min().min() or 80) - 2), 101],
+                                     gridcolor="#e4e6ea"),
+                          legend=dict(orientation="h", y=-0.2))
+        st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        fig2 = go.Figure()
+        fig2.add_bar(x=tbl["月份"], y=tbl["全廠MTTR(h)"], name="全廠 MTTR",
+                     marker_color=["#2e9d57" if (v or 0) <= THRESHOLD_MTTR else "#d64541" for v in tbl["全廠MTTR(h)"]],
+                     text=tbl["全廠MTTR(h)"].round(1), textposition="outside", textangle=0)
+        fig2.add_hline(y=THRESHOLD_MTTR, line_dash="dash", line_color="#f0a020",
+                       annotation_text=f"目標 ≤{THRESHOLD_MTTR:g}h")
+        fig2.update_layout(**PLOT_LAYOUT, height=320, showlegend=False,
+                           title=dict(text="全廠 MTTR（h）", font_size=14, x=0),
+                           yaxis=dict(gridcolor="#e4e6ea"))
+        st.plotly_chart(fig2, use_container_width=True)
+
+    # ── 3. 每月分析摘要 ──
+    st.markdown('<div class="section-title">每月分析摘要</div>', unsafe_allow_html=True)
+    for i, mo in enumerate(reversed(months_avail)):
+        idx = months_avail.index(mo)
+        prev = months_avail[idx - 1] if idx > 0 else None
+        a = cache[mo]["fleet"]
+        flag = ("✓" if (a["mttr"] or 0) <= THRESHOLD_MTTR and (a["avail"] or 0) >= THRESHOLD_AVAIL else "✗")
+        with st.expander(f"{flag}　{mo}　故障 {a['faults']} 次｜MTTR {a['mttr']}h｜可用率 {a['avail']}%",
+                         expanded=(i == 0)):
+            items = summary_text(mo, prev, cache, df_raw, SERIES_NAME, TARGETS)
+            st.markdown("".join(f'<div class="sum-row"><span class="sum-k">{k}</span>'
+                                f'<span class="sum-v">{_html.escape(v)}</span></div>' for k, v in items),
+                        unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════
 def main():
@@ -1225,8 +1358,8 @@ def main():
         ds = df_summary[df_summary["月份"].isin(sel_months)]
 
         # ══ 分頁 ═══════════════════════════════════════════════════════════
-        tab5, tab1, tab2, tab3, tab4 = st.tabs(
-            ["📝 月度分析", "📊 月別總覽", "🔧 機台明細", "⚠️ 故障分析", "📈 趨勢分析"])
+        tab5, tab6, tab1, tab2, tab3, tab4 = st.tabs(
+            ["📝 月度分析", "🎯 目標與達成", "📊 月別總覽", "🔧 機台明細", "⚠️ 故障分析", "📈 趨勢分析"])
 
         # ══ Tab1：月別總覽（大類 → 系列代碼一覽表）════════════════════════════
         with tab1:
@@ -1235,7 +1368,7 @@ def main():
             def style_avail_cell(val):
                 if not isinstance(val, (int, float)): return ""
                 if val >= THRESHOLD_AVAIL: return "color:#1f7a4d;font-weight:600"
-                elif val >= 80: return "color:#7b4f00"
+                elif val >= AVAIL_WARN: return "color:#7b4f00"
                 return "color:#a32d2d;font-weight:600"
 
             def style_failures(val):
@@ -1268,10 +1401,9 @@ def main():
                 k2.metric("故障次數", f"{t_fail} 次")
                 k3.metric("總停工時數", f"{t_down} h")
                 k4.metric("MTBF（合計）", f"{tp['mtbf']} h" if tp["mtbf"] is not None else "無故障",
-                          "✓ 達標" if t_mtbf >= THRESHOLD_MTBF or not t_fail else f"目標≥{THRESHOLD_MTBF}h",
-                          delta_color="normal" if t_mtbf >= THRESHOLD_MTBF or not t_fail else "inverse")
+                          "參考值（不設目標）", delta_color="off")
                 k5.metric("可用率（合計）", f"{t_avail}%",
-                          "✓ 達標" if t_avail >= THRESHOLD_AVAIL else f"目標≥{THRESHOLD_AVAIL}%",
+                          "✓ 達標" if t_avail >= THRESHOLD_AVAIL else f"目標≥{THRESHOLD_AVAIL:g}%",
                           delta_color="normal" if t_avail >= THRESHOLD_AVAIL else "inverse")
 
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -1379,7 +1511,7 @@ def main():
             def color_avail(val):
                 if not isinstance(val, (int, float)): return ""
                 if val >= THRESHOLD_AVAIL: return "background-color:#e2efda"
-                elif val >= 80: return "background-color:#fff2cc"
+                elif val >= AVAIL_WARN: return "background-color:#fff2cc"
                 return "background-color:#fcebeb"
 
             st.dataframe(
@@ -1545,14 +1677,19 @@ def main():
                             unsafe_allow_html=True)
                 fig6 = go.Figure()
                 fig6.add_scatter(x=ds2["月份"], y=ds2["平均MTBF(h)"],
-                                 name="平均MTBF(h)", mode="lines+markers",
+                                 name="MTBF(h)（參考）", mode="lines+markers",
                                  line=dict(color="#2563c9", width=2), marker=dict(size=7))
                 fig6.add_scatter(x=ds2["月份"], y=ds2["平均MTTR(h)"],
-                                 name="平均MTTR(h)", mode="lines+markers",
+                                 name="MTTR(h)", mode="lines+markers",
                                  line=dict(color="#f0a020", width=2), marker=dict(size=7),
                                  yaxis="y2")
-                fig6.add_hline(y=THRESHOLD_MTBF, line_dash="dash", line_color="#2563c9",
-                               annotation_text=f"MTBF目標 {THRESHOLD_MTBF}h")
+                fig6.add_shape(type="line", xref="paper", x0=0, x1=1, yref="y2",
+                               y0=THRESHOLD_MTTR, y1=THRESHOLD_MTTR,
+                               line=dict(dash="dash", color="#f0a020", width=1.5))
+                fig6.add_annotation(xref="paper", x=1, yref="y2", y=THRESHOLD_MTTR,
+                                    text=f"MTTR目標 ≤{THRESHOLD_MTTR:g}h", showarrow=False,
+                                    xanchor="right", yanchor="bottom",
+                                    font=dict(size=11, color="#f0a020"))
                 fig6.update_layout(**PLOT_LAYOUT,
                     yaxis=dict(title="MTBF(h)", gridcolor='#e4e6ea'),
                     yaxis2=dict(title="MTTR(h)", overlaying="y", side="right"),
@@ -1570,7 +1707,7 @@ def main():
                 fig7.add_hline(y=THRESHOLD_AVAIL, line_dash="dash", line_color="#f0a020",
                                annotation_text=f"目標 {THRESHOLD_AVAIL}%")
                 fig7.update_layout(**PLOT_LAYOUT, height=320,
-                    yaxis=dict(title="可用率(%)", range=[0,110], gridcolor='#e4e6ea'))
+                    yaxis=dict(title="可用率(%)", range=[min(97, float(ds2["平均可用率(%)"].min()) - 0.5), 100.2], gridcolor='#e4e6ea'))
                 st.plotly_chart(fig7, use_container_width=True)
 
             # 熱圖 — 分三大類
@@ -1580,12 +1717,12 @@ def main():
             st.markdown(
                 '<div style="display:flex;gap:16px;margin:4px 0 12px;font-size:13px;">'
                 '<span style="background:#fcebeb;padding:3px 10px;border-radius:4px;'
-                'color:#a32d2d;font-weight:600;">🟥 ＜80%　警示</span>'
+                f'color:#a32d2d;font-weight:600;">🟥 ＜{AVAIL_WARN:g}%　警示</span>'
                 '<span style="background:#fff2cc;padding:3px 10px;border-radius:4px;'
-                'color:#7b4f00;font-weight:600;">🟨 80–94%　偏低</span>'
+                f'color:#7b4f00;font-weight:600;">🟨 {AVAIL_WARN:g}–{THRESHOLD_AVAIL:g}%　未達標</span>'
                 '<span style="background:#e2efda;padding:3px 10px;border-radius:4px;'
-                'color:#1f7a4d;font-weight:600;">🟩 ≥95%　良好</span>'
-                '<span style="color:#6b7684;padding:3px 0;">（格內數字為平均可用率 %）</span>'
+                f'color:#1f7a4d;font-weight:600;">🟩 ≥{THRESHOLD_AVAIL:g}%　達標</span>'
+                '<span style="color:#6b7684;padding:3px 0;">（系列合計可用率 %）</span>'
                 '</div>',
                 unsafe_allow_html=True)
             TYPE_COLOR_HM = {"成型類": "#2563c9", "加工類": "#2e9d57", "包裝類": "#f0a020"}
@@ -1605,8 +1742,10 @@ def main():
                 # 短月份標籤
                 pivot.columns = [c.replace("2026-", "") for c in pivot.columns]
                 fig_hm = px.imshow(pivot, text_auto=".1f", aspect="auto",
-                                   color_continuous_scale=["#fcebeb","#fff2cc","#e2efda"],
-                                   zmin=70, zmax=100)
+                                   color_continuous_scale=[(0, "#fcebeb"), (0.5, "#fff2cc"),
+                                                           (0.8, "#fff2cc"), (0.8001, "#e2efda"),
+                                                           (1, "#e2efda")],
+                                   zmin=90, zmax=100)
                 fig_hm.update_layout(
                     height=max(200, len(pivot) * 38 + 60),
                     margin=dict(t=10, b=10, l=130, r=60),
@@ -1617,6 +1756,10 @@ def main():
                 fig_hm.update_xaxes(side="bottom", tickangle=0, tickfont=dict(size=13))
                 fig_hm.update_yaxes(tickfont=dict(size=13))
                 st.plotly_chart(fig_hm, use_container_width=True)
+
+        # ══ Tab6：目標與達成 ═════════════════════════════════════════════
+        with tab6:
+            render_targets(df_kpi, df_raw, months_avail)
 
         # ══ Tab5：月度分析（系列合計＋機台個別）══════════════════════════
         with tab5:

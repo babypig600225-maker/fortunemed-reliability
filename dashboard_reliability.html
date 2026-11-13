@@ -113,7 +113,7 @@ svg text{font-family:inherit;}
 
   <section class="panel">
     <h2 id="trendTitle">MTBF / MTTR 月趨勢</h2>
-    <div class="hint">藍線＝MTBF（h，左軸），橘線＝MTTR（h，右軸）；目標：MTBF≥100h、MTTR≤8h。</div>
+    <div class="hint">藍線＝MTBF（h，左軸，參考值），橘線＝MTTR（h，右軸）；目標：MTTR≤8h。全廠 MTBF 會隨在用台數增減，不設目標。</div>
     <div class="chartbox" id="trend"></div>
     <div class="tip" id="trendTip"></div>
   </section>
@@ -247,12 +247,14 @@ function renderKpis(){
   const cards = [
     { k:'MTBF（合計）', v: kd.mtbf!=null ? kd.mtbf+' h' : '—',
       d: delta('mtbf','h',false)
-         +(kd.mtbf!=null ? ' <span class="'+(kd.mtbf>=100?'up':'down')+'">目標≥100h</span>' : '') },
+         +(kd.mtbf!=null ? ' <span class="flat">參考值</span>' : '') },
     { k:'MTTR（合計）', v: kd.mttr!=null ? kd.mttr+' h' : '—',
       d: delta('mttr','h',true)
          +(kd.mttr!=null ? ' <span class="'+(kd.mttr<=8?'up':'down')+'">目標≤8h</span>' : '') },
     { k:'可用率（合計）', v: kd.avail!=null ? kd.avail+'%' : '—',
-      d: delta('avail','%',true) + (kd.low_avail ? ' <span class="down">'+kd.low_avail+' 台未達標</span>' : '') },
+      d: delta('avail','%',false)
+         +(kd.avail!=null ? ' <span class="'+(kd.avail>=99?'up':'down')+'">目標≥99%</span>' : '')
+         +(kd.low_avail ? ' <span class="down">'+kd.low_avail+' 個系列未達</span>' : '') },
     { k:'總停工時數', v: kd.downtime!=null ? kd.downtime+' h' : '—',
       d: kd.machines ? kd.machines+' 台機台' : '' },
     { k:'故障次數', v: kd.faults!=null ? kd.faults+' 次' : '—',
@@ -274,9 +276,7 @@ function renderSummary(){
 
   let txt = '';
   if(kd.mtbf!=null){
-    const mtbfOk = kd.mtbf>=100;
-    txt += monthLabel+'「'+typeLabel+'」MTBF <b>'+kd.mtbf+' h</b>（目標≥100h，';
-    txt += mtbfOk ? '<b class="up">達標</b>）' : '<b class="down">未達標</b>）';
+    txt += monthLabel+'「'+typeLabel+'」MTBF <b>'+kd.mtbf+' h</b>（參考值）';
     if(prev.mtbf!=null){
       const d = +(kd.mtbf-prev.mtbf).toFixed(1);
       const prevMonth = DATA.months[DATA.months.indexOf(curMonth)-1] || '';
@@ -292,7 +292,10 @@ function renderSummary(){
     txt += mttrOk ? '<b class="up">達標</b>）。' : '<b class="down">超標</b>）。';
   }
   if(kd.faults!=null) txt += '共發生故障 <b>'+kd.faults+' 次</b>，總停工時數 <b>'+kd.downtime+' h</b>，涉及 <b>'+kd.machines+' 台</b>機台。';
-  if(kd.low_avail) txt += ' 其中 <b class="down">'+kd.low_avail+' 台</b>可用率低於 85%，請優先關注。';
+  if(kd.avail!=null){
+    txt += ' 可用率 <b>'+kd.avail+'%</b>（目標≥99%，'+(kd.avail>=99?'<b class="up">達標</b>）':'<b class="down">未達標</b>）');
+    txt += kd.low_avail ? '，其中 <b class="down">'+kd.low_avail+' 個系列</b>低於 99%，請優先關注。' : '，各系列皆達標。';
+  }
 
   document.getElementById('summary').innerHTML =
     '<h2>'+monthLabel+'「'+typeLabel+'」可靠性摘要</h2>'
@@ -376,7 +379,7 @@ function renderTrend(){
   const mtbfTicks = [0, 50, 100, mtbfMax];
   mtbfTicks.forEach(function(v){
     const y = ypL(v);
-    const isTarget = v===100;
+    const isTarget = false;
     paths += '<line x1="'+pad.l+'" y1="'+y+'" x2="'+(pad.l+cw)+'" y2="'+y+'"'
       +' stroke="'+(isTarget?orngC:gridC)+'" stroke-width="'+(isTarget?1.5:1)+'"'
       +' stroke-dasharray="'+(isTarget?'5,3':'')+'" />';
@@ -404,7 +407,7 @@ function renderTrend(){
   trend.forEach(function(pt,i){
     const x=xp(i), y1=ypL(pt.mtbf), y2=ypR(pt.mttr);
     const isCur = pt.m===curMonth;
-    const colMtbf = pt.mtbf>=100?blueC:'#d64541';
+    const colMtbf = blueC;
     // MTBF dot
     paths += '<circle cx="'+x+'" cy="'+y1+'" r="'+(isCur?6:4)+'" fill="'+colMtbf+'" stroke="'+bgHit+'" stroke-width="2"/>';
     paths += '<text x="'+x+'" y="'+(y1-10)+'" text-anchor="middle" font-size="11" font-weight="'+(isCur?700:400)+'" fill="'+colMtbf+'">'+pt.mtbf+'</text>';

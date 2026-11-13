@@ -126,7 +126,7 @@ def build_month_tables(month, dk, dr, pool, judge, series_name):
     ser_rows = []
     for sc, g in dkm.groupby("系列"):
         p = pool(g)
-        st_ = judge(p["faults"], p["mtbf"], p["mttr"])
+        st_ = judge(p["faults"], p["mtbf"], p["mttr"], p["avail"])
         watch = df_m[(df_m["設備系列"] == sc) & df_m["狀態判定"].isin(["需重點改善", "需改善"])]
         ser_rows.append({
             "月份": month, "月標準時數": hours,
@@ -136,6 +136,7 @@ def build_month_tables(month, dk, dr, pool, judge, series_name):
             "總維修停工時間(H)": p["downtime"],
             "MTBF(小時/次)": p["mtbf"] if p["faults"] else "無故障",
             "MTTR(小時/次)": p["mttr"] if p["faults"] else 0,
+            "可用率(%)": p["avail"],
             "狀態判定": st_,
             "需關注機台": "、".join(f"{r['設備代號']}({r['狀態判定']})" for _, r in watch.iterrows()),
             "分析與建議": series_comment(p, drm[drm["系列"] == sc]),
@@ -144,11 +145,30 @@ def build_month_tables(month, dk, dr, pool, judge, series_name):
     return df_s, df_m
 
 
-def to_excel(df_s, df_m, month):
+def to_excel(df_s, df_m, month, summary_items=None, kpi_rows=None):
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        if kpi_rows or summary_items:
+            rows = list(kpi_rows or [])
+            if summary_items:
+                rows += [{"項目": "", "實績": "", "目標": "", "判定": ""},
+                         {"項目": "分析摘要", "實績": "", "目標": "", "判定": ""}]
+                rows += [{"項目": k, "實績": v, "目標": "", "判定": ""} for k, v in summary_items]
+            pd.DataFrame(rows, columns=["項目", "實績", "目標", "判定"]).to_excel(
+                xw, sheet_name="達成摘要", index=False)
+            ws0 = xw.sheets["達成摘要"]
+            ws0.column_dimensions["A"].width = 18
+            ws0.column_dimensions["B"].width = 90
+            ws0.column_dimensions["C"].width = 14
+            ws0.column_dimensions["D"].width = 10
+            for row in ws0.iter_rows(min_row=1):
+                for c in row:
+                    c.alignment = Alignment(vertical="top", wrap_text=True)
+            for c in ws0[1]:
+                c.font = Font(bold=True)
+                c.fill = PatternFill("solid", fgColor="9BC2E6")
         df_s.to_excel(xw, sheet_name="系列分析(合計)", index=False)
         df_m.to_excel(xw, sheet_name="機台明細(個別)", index=False)
         thin = Side(style="thin", color="BFC5CE")
