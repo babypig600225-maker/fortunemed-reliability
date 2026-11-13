@@ -8,6 +8,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import re, json, base64, requests, io, os, unicodedata
+# 重新載入自訂模組：Streamlit Cloud 更新時只重載 app.py，舊模組會留在記憶體造成版本不一致
+import importlib, equipment, monthly_report, targets
+for _m in (equipment, monthly_report, targets):
+    importlib.reload(_m)
 from equipment import parse_equipment_excel, map_repair_code, ACTIVE_STATUS
 from monthly_report import build_month_tables, to_excel, STATUS_STYLE, STATUS_ORDER
 import html as _html
