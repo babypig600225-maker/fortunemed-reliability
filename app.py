@@ -869,6 +869,7 @@ def build_dashboard_json(df_kpi, hours_base, special_off, updated=""):
         "machines": machines,
         "series_kpi": series_kpi,
         "series_names": series_names,
+        "loc": {m["code"]: fm_url(m["code"]) for m in machines if fm_url(m["code"])},
     }
 
 
@@ -892,6 +893,33 @@ def avail_badge(val):
     elif val >= AVAIL_WARN:
         return f'<span class="badge badge-amber">△ {val}%</span>'
     return f'<span class="badge badge-red">✗ {val}%</span>'
+
+# ── 樓層設備位置圖連結 ────────────────────────────────────────────────
+FM_URL = "https://claude.ai/artifact/1jMLBQQxo3fYRuzssT2i68"
+try:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "location.json"), encoding="utf-8") as _f:
+        FM_LOC = json.load(_f)
+except Exception:
+    FM_LOC = {}
+
+def fm_key(code):
+    """設備代號 → 位置圖上的代號（找不到回傳 None）。子代號退回上層。"""
+    if not isinstance(code, str) or not code:
+        return None
+    c = code
+    while c.count("-") >= 3:
+        if c in FM_LOC:
+            return c
+        c = c.rsplit("-", 1)[0]
+    return None
+
+def fm_url(code, empty=None):
+    k = fm_key(code)
+    return f"{FM_URL}#{k}" if k else empty
+
+def loc_column_config():
+    return st.column_config.LinkColumn("位置", display_text="📍位置", width="small",
+                                       help="在樓層設備位置圖查看（只有主要生產設備有圖號）")
 
 def _status_pill(v):
     bg, fg = STATUS_STYLE.get(v, ("#f1f3f6", "#6b7684"))
@@ -1015,14 +1043,16 @@ def render_monthly_analysis(df_kpi, df_raw, months_avail, excluded, nonfault=Non
     def _st_color(v):
         bg, fg = STATUS_STYLE.get(v, ("", ""))
         return f"background-color:{bg};color:{fg};font-weight:600" if bg else ""
+    dm = dm.assign(位置=dm["設備代號"].map(lambda c: fm_url(c, "")))
     st.dataframe(
-        dm[["設備代號", "設備名稱", "設備系列", "故障次數", "總維修工時(H)", "總維修停工時間(H)",
+        dm[["設備代號", "位置", "設備名稱", "設備系列", "故障次數", "總維修工時(H)", "總維修停工時間(H)",
             "MTBF(小時/次)", "MTTR(小時/次)", "狀態判定", "主要故障"]]
           .style.map(_st_color, subset=["狀態判定"])
           .format({"總維修工時(H)": "{:.2f}", "總維修停工時間(H)": "{:.2f}", "MTTR(小時/次)": "{:.2f}",
                    "MTBF(小時/次)": lambda v: v if isinstance(v, str) else f"{v:.2f}"}),
         use_container_width=True, hide_index=True,
-        column_config={"主要故障": st.column_config.TextColumn(width="large")})
+        column_config={"主要故障": st.column_config.TextColumn(width="large"),
+                       "位置": loc_column_config()})
 
     # ── 非故障報修單 ──
     if nonfault is not None and len(nonfault):
@@ -1518,6 +1548,7 @@ def main():
                 elif val >= AVAIL_WARN: return "background-color:#fff2cc"
                 return "background-color:#fcebeb"
 
+            agg.insert(1, "位置", agg["機台代碼"].map(lambda c: fm_url(c, "")))
             st.dataframe(
                 agg.style
                    .map(color_avail, subset=["平均可用率"])
@@ -1528,7 +1559,8 @@ def main():
                        "平均MTTR":  "{:.2f}",
                        "平均可用率": "{:.2f}",
                    }, na_rep="無故障"),
-                use_container_width=True, hide_index=True)
+                use_container_width=True, hide_index=True,
+                column_config={"位置": loc_column_config()})
 
             st.markdown("---")
             sel_m = st.selectbox("查看單台月別明細", ["— 選擇機台 —"] + list(agg["機台代碼"]))
@@ -1589,7 +1621,9 @@ def main():
                     sel_name = SERIES_NAME.get(
                         re.sub(r"^(M-\d{3}-\d{3}).*$", r"\1", str(sel_code)), "")
                     recs = dr[dr["機台代碼"] == sel_code].copy()
-                    st.markdown(f"**🔍 {sel_code}　{sel_name}　故障原因（{len(recs)} 筆）**")
+                    _u = fm_url(sel_code)
+                    st.markdown(f"**🔍 {sel_code}　{sel_name}　故障原因（{len(recs)} 筆）**"
+                                + (f"　[📍在位置圖查看]({_u})" if _u else ""))
                     if recs.empty or "需求" not in recs.columns:
                         st.info("無故障原因資料")
                     else:
@@ -1618,8 +1652,10 @@ def main():
                 repeat = dk[dk["重複故障"] == 1].groupby(["機台代碼","機台名稱"])\
                            .agg(發生月數=("月份","nunique"),
                                 累計故障次數=("故障次數","sum")).reset_index()
+                repeat.insert(1, "位置", repeat["機台代碼"].map(fm_url))
                 st.dataframe(repeat.sort_values("發生月數", ascending=False),
-                             use_container_width=True, hide_index=True)
+                             use_container_width=True, hide_index=True,
+                             column_config={"位置": loc_column_config()})
 
             with c4:
                 st.markdown('<div class="section-title">📋 故障原因分類</div>',

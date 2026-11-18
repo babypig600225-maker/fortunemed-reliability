@@ -83,6 +83,8 @@ svg text{font-family:inherit;}
 .hcsg-toggle{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap;}
 .hcsg-body{border-top:1px solid var(--line);padding:12px;}
 .health-inner{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;}
+.loclink{margin-left:auto;font-size:11px;font-weight:600;color:var(--accent);text-decoration:none;white-space:nowrap}
+.loclink:hover{text-decoration:underline}
 </style>
 </head>
 <body>
@@ -604,7 +606,9 @@ function renderHealth(){
 
       html += '<div class="hc'+cls2+'" id="'+id+'" onclick="toggleMc(\''+id+'\')">'
         +'<div class="top"><i style="background:'+col2+'"></i>'
-        +'<span style="font-size:12px;font-weight:600">'+shortCode+'</span></div>'
+        +'<span style="font-size:12px;font-weight:600">'+shortCode+'</span>'
+        +((DATA.loc||{})[m.code]?'<a class="loclink" href="'+DATA.loc[m.code]+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="在樓層設備位置圖查看">📍位置</a>':'')
+        +'</div>'
         +'<div style="font-size:11.5px;color:var(--muted);margin-bottom:2px;line-height:1.3">'+m.name+'</div>'
         +'<div class="big" style="color:'+col2+'">'+(mb2v?mb2+'h':'<span style="font-size:1rem;color:var(--muted)">'+(curMonth&&!m._faults?'本月無故障':'無資料')+'</span>')+'</div>'
         +'<div class="meta">MTTR '+(m._mttr!=null&&!isNaN(m._mttr)?m._mttr+'h':(curMonth&&!m._faults?'—':'無資料'))
